@@ -1,4 +1,4 @@
-.PHONY: install build dev clean dev-server dev-web dev-infra build-server build-web build-processing build-docker
+.PHONY: install build dev clean dev-server dev-web dev-infra dev-docker dev-docker-down build-server build-web build-processing build-docker
 
 # ─── Install ───────────────────────────────────────────────────
 install: install-server install-web
@@ -14,7 +14,7 @@ install-python:
 		cd processing && pip install -r requirements.txt; \
 	fi
 
-# ─── Development ──────────────────────────────────────────────
+# ─── Development (native — fast hot reload) ──────────────────
 dev: dev-infra dev-server dev-web
 
 dev-server:
@@ -24,7 +24,17 @@ dev-web:
 	cd web && npm run dev
 
 dev-infra:
-	cd tools/local-stack && docker compose up -d
+	cd tools/local-stack && docker compose up -d localstack redis
+
+# ─── Development (Docker — production parity) ────────────────
+dev-docker:
+	cd tools/local-stack && docker compose --profile app up -d --build
+
+dev-docker-down:
+	cd tools/local-stack && docker compose --profile app down
+
+dev-docker-logs:
+	cd tools/local-stack && docker compose --profile app logs -f
 
 # ─── Build ────────────────────────────────────────────────────
 build: build-server build-web
@@ -55,7 +65,7 @@ clean:
 
 # ─── Infrastructure ──────────────────────────────────────────
 infra-up:
-	cd tools/local-stack && docker compose up -d
+	cd tools/local-stack && docker compose up -d localstack redis
 
 infra-down:
 	cd tools/local-stack && docker compose down

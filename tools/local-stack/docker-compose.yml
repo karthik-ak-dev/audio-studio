@@ -1,6 +1,5 @@
-version: "3.8"
-
 services:
+  # ─── Infrastructure ──────────────────────────────────────────
   localstack:
     image: localstack/localstack:latest
     ports:
@@ -13,11 +12,70 @@ services:
       - localstack-data:/var/lib/localstack
       - /var/run/docker.sock:/var/run/docker.sock
       - ./init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── Application Services ────────────────────────────────────
+  server:
+    build:
+      context: ../../server
+      dockerfile: ../infra/docker/Dockerfile.server
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - ENV=development
+      - CORS_ORIGINS=http://localhost:8080
+      - AWS_REGION=ap-south-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DYNAMODB_ENDPOINT=http://localstack:4566
+      - DYNAMO_TABLE_MEETINGS=stage-AudioStudio_Meetings
+      - DYNAMO_TABLE_SESSIONS=stage-AudioStudio_Sessions
+      - DYNAMO_TABLE_RECORDINGS=stage-AudioStudio_Recordings
+      - DYNAMO_TABLE_RECORDING_STATE=stage-AudioStudio_RecordingState
+      - DYNAMO_TABLE_STATS=stage-AudioStudio_GlobalStats
+      - AWS_ENDPOINT=http://localstack:4566
+      - S3_BUCKET=stage-audio-studio-recordings
+      - SQS_ENDPOINT=http://localstack:4566
+      - SQS_PROCESSING_QUEUE_URL=http://localstack:4566/000000000000/stage-AudioStudio_Processing.fifo
+      - SQS_RESULTS_QUEUE_URL=http://localstack:4566/000000000000/stage-AudioStudio_ProcessingResults
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=dev-secret-key-not-for-production
+    depends_on:
+      localstack:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - app
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+      args:
+        - NGINX_CONF=infra/docker/nginx.docker.conf
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
+    profiles:
+      - app
 
 volumes:
   localstack-data:
