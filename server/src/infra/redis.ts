@@ -1,3 +1,20 @@
+/**
+ * redis.ts — Redis client for Socket.IO horizontal scaling.
+ *
+ * When running multiple server pods behind a load balancer, Socket.IO
+ * needs a way to broadcast events across all pods. The Redis adapter
+ * uses a pub/sub channel pair to relay socket events between pods.
+ *
+ * Two separate Redis clients are required:
+ *   - pubClient: publishes events to the Redis channel
+ *   - subClient: subscribes to receive events from other pods
+ *
+ * In development (single-pod mode), Redis is optional — the server
+ * runs fine without it, but events only reach sockets on the same pod.
+ *
+ * Clients are lazily initialized (created on first access) and support
+ * graceful shutdown via disconnectRedis().
+ */
 import Redis from 'ioredis';
 import { logger } from '../utils/logger';
 

@@ -1,3 +1,21 @@
+/**
+ * sqs.ts — SQS client for the async audio processing pipeline.
+ *
+ * Two SQS queues are used (both FIFO for ordering guarantees):
+ *
+ *   1. Processing Queue (QUEUES.PROCESSING):
+ *      Server → External Pipeline. When both participants' recordings
+ *      are uploaded, pipelineService publishes a ProcessSessionMessage
+ *      here. The external audio processing pipeline consumes it.
+ *
+ *   2. Results Queue (QUEUES.PROCESSING_RESULTS):
+ *      External Pipeline → Server. After processing, the pipeline
+ *      publishes a ProcessingResult here. The processingResultConsumer
+ *      polls this queue and pushes results to clients via Socket.IO.
+ *
+ * In development, SQS can point to LocalStack (localhost:4566).
+ * Queue URLs are configured via environment variables.
+ */
 import {
   SQSClient,
   SendMessageCommand,

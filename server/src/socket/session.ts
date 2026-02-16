@@ -1,3 +1,41 @@
+/**
+ * socket/session.ts — User session management (join, reconnect, disconnect).
+ *
+ * This is the most complex socket handler — it manages the full lifecycle
+ * of a user's connection to a meeting room, including:
+ *
+ * ─── JOIN_ROOM Flow ──────────────────────────────────────────────
+ *   1. Auto-creates the meeting if it doesn't exist (lazy creation)
+ *   2. Checks for an existing active session (reconnection detection):
+ *      - If reconnecting: disconnects the old socket (ghost cleanup),
+ *        updates the session's socketId, preserves role/email from the
+ *        original session, and notifies the partner to reset WebRTC
+ *      - If new user: checks room capacity (max 2 participants),
+ *        creates a new Session in DynamoDB, increments global stats
+ *   3. Joins the Socket.IO room and sets socket metadata (roomId, userId, etc.)
+ *   4. Fetches current recording state from DynamoDB
+ *   5. Notifies other participants about the new/reconnected user
+ *   6. Sends full room state (meeting info, participant list, recording state)
+ *      back to the joining user
+ *   7. If recording is active and this is a reconnection, sends RESUME_RECORDING
+ *      with elapsed time so the client can resume its recording timer
+ *
+ * ─── Disconnect Flow ────────────────────────────────────────────
+ *   1. Marks the session as inactive in DynamoDB (sets leftAt, isActive=false)
+ *   2. Notifies remaining participants via USER_LEFT
+ *   3. Decrements global active session count
+ *
+ * ─── Ghost Session Cleanup ──────────────────────────────────────
+ *   When a user opens the meeting in a new tab (or their browser reconnects
+ *   with a new socket), the old socket becomes a "ghost." This handler:
+ *     - Sends DUPLICATE_SESSION to the old socket (shows a warning in the old tab)
+ *     - Force-disconnects the old socket
+ *     - Waits GHOST_SOCKET_DELAY_MS for the Socket.IO adapter to clean up
+ *       (prevents both sockets being in the room simultaneously → double audio)
+ *
+ * Session IDs are composites of `${userId}#${joinedAt}` to allow multiple
+ * sessions per user over time while keeping each unique.
+ */
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import { SOCKET_EVENTS, LIMITS } from '../shared';
 import * as sessionRepo from '../repositories/sessionRepo';
@@ -7,18 +45,21 @@ import * as meetingService from '../services/meetingService';
 import { logger } from '../utils/logger';
 
 export function handleSession(io: SocketIOServer, socket: Socket): void {
+  // ─── Join Room ─────────────────────────────────────────────────
   socket.on(SOCKET_EVENTS.JOIN_ROOM, async ({ roomId, role, userId, userEmail }) => {
     try {
-      // Validate input
+      // Validate required fields
       if (!roomId || !role) {
         socket.emit(SOCKET_EVENTS.ERROR, { message: 'roomId and role are required' });
         return;
       }
 
-      // Auto-create meeting if it doesn't exist
+      // Lazy meeting creation — the first person to join creates the meeting
       const meeting = await meetingService.getOrCreateMeeting(roomId);
 
-      // Check for previous session (reconnection)
+      // ─── Reconnection Detection ─────────────────────────────
+      // Look up any existing active session for this userId in this room.
+      // If found, this is a reconnection (e.g., page refresh, new tab).
       let isReconnection = false;
       let effectiveRole = role;
       let effectiveEmail = userEmail || '';
@@ -29,31 +70,34 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
         : null;
 
       if (previousSession && previousSession.meetingId === roomId) {
-        // Reconnection flow
+        // ─── Reconnection: Clean Up Ghost Socket ────────────
         const oldSocketId = previousSession.socketId;
         if (oldSocketId && oldSocketId !== socket.id) {
-          // Notify the old tab and disconnect it
+          // Tell the old tab it's been superseded
           io.to(oldSocketId).emit(SOCKET_EVENTS.DUPLICATE_SESSION, {
             message: 'Meeting opened in another tab',
           });
 
+          // Force-disconnect the ghost socket
           const oldSocket = io.sockets.sockets.get(oldSocketId);
           if (oldSocket) {
             logger.info('Cleaning up ghost session', { oldSocketId, userId });
             oldSocket.disconnect(true);
 
-            // Wait for the adapter to clear the old socket (prevents double audio)
+            // Brief delay for the adapter to remove the old socket from the room
+            // (prevents both sockets being in the room → double audio streams)
             await new Promise((resolve) => setTimeout(resolve, LIMITS.GHOST_SOCKET_DELAY_MS));
           }
         }
 
-        // Update socket ID on the existing session
+        // Point the existing DynamoDB session to this new socket ID
         await sessionRepo.updateSocketId(
           previousSession.meetingId,
           previousSession.sessionId,
           socket.id,
         );
 
+        // Preserve the original session's role and user info
         isReconnection = true;
         effectiveRole = previousSession.userRole;
         effectiveEmail = userEmail || previousSession.userEmail || '';
@@ -61,7 +105,7 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
 
         logger.info('User reconnected', { userId, roomId, role: effectiveRole });
       } else {
-        // New user — check capacity
+        // ─── New User: Capacity Check ───────────────────────
         const activeCount = await sessionRepo.getActiveSessionCount(roomId);
         if (activeCount >= LIMITS.MAX_PARTICIPANTS) {
           logger.warn('Room full', { roomId, activeCount });
@@ -72,7 +116,9 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
           return;
         }
 
-        // Create new session in DynamoDB
+        // ─── New User: Create Session in DynamoDB ───────────
+        // sessionId is a composite key: `${userId}#${timestamp}` to allow
+        // multiple sessions per user over time while keeping each unique.
         const now = new Date().toISOString();
         await sessionRepo.createSession({
           meetingId: roomId,
@@ -86,23 +132,24 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
           isActive: true,
         });
 
-        // Update stats
+        // Update global dashboard counters
         await statsRepo.incrementActiveSession();
 
         logger.info('New user joined', { userId: effectiveUserId, roomId, role: effectiveRole });
       }
 
-      // Join the Socket.io room
+      // ─── Attach Metadata to Socket ──────────────────────────
+      // These properties are read by other handlers (signaling, recording, etc.)
       socket.join(roomId);
       socket.roomId = roomId;
       socket.userId = effectiveUserId;
       socket.userRole = effectiveRole;
       socket.userEmail = effectiveEmail;
 
-      // Get recording state
+      // Fetch current recording state (is someone recording right now?)
       const recordingState = await recordingStateRepo.getOrCreateDefault(roomId);
 
-      // Notify others
+      // ─── Notify Other Participants ──────────────────────────
       socket.to(roomId).emit(SOCKET_EVENTS.USER_JOINED, {
         userId: socket.id,
         persistentId: effectiveUserId,
@@ -111,7 +158,8 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
         isReconnection,
       });
 
-      // If reconnecting, tell the other participant to reset peer connection
+      // On reconnection, tell the partner to tear down and re-establish
+      // the WebRTC peer connection (the old socket ID is no longer valid)
       if (isReconnection) {
         socket.to(roomId).emit(SOCKET_EVENTS.PEER_RECONNECTED, {
           userId: effectiveUserId,
@@ -119,7 +167,9 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
         });
       }
 
-      // Build participants list from DynamoDB (multi-pod safe)
+      // ─── Send Room State to Joining User ────────────────────
+      // Build participants list from DynamoDB (multi-pod safe — doesn't
+      // rely on Socket.IO's in-memory room, which is pod-local)
       const activeSessions = await sessionRepo.getActiveSessionsByMeeting(roomId);
       const participants = activeSessions.map((s) => ({
         socketId: s.socketId,
@@ -128,14 +178,14 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
         userEmail: s.userEmail,
       }));
 
-      // Send room state to the joining user
       socket.emit(SOCKET_EVENTS.ROOM_STATE, {
         meeting,
         participants,
         recordingState,
       });
 
-      // If recording is active and user is reconnecting, send resume
+      // If recording is active and this is a reconnect, send the elapsed time
+      // so the client can resume its recording timer and continue capturing audio
       if (recordingState.isRecording && isReconnection && recordingState.startedAt) {
         const startedAtMs = new Date(recordingState.startedAt).getTime();
         socket.emit(SOCKET_EVENTS.RESUME_RECORDING, {
@@ -156,22 +206,25 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
     }
   });
 
-  // Disconnect handler
+  // ─── Disconnect Handler ──────────────────────────────────────
+  // When a socket disconnects (tab close, network drop, force-disconnect),
+  // clean up the session in DynamoDB and notify remaining participants.
   socket.on('disconnect', async () => {
     logger.info('User disconnected', { socketId: socket.id, roomId: socket.roomId });
     try {
-      // Mark session inactive in DynamoDB
+      // Mark session inactive (sets leftAt timestamp, isActive=false)
+      // Looks up the session by socketId via the SocketIndex GSI
       const session = await sessionRepo.markSessionInactiveBySocketId(socket.id);
 
       if (session && socket.roomId) {
-        // Notify others
+        // Let the partner know the other user left
         io.to(socket.roomId).emit(SOCKET_EVENTS.USER_LEFT, {
           userId: socket.id,
           persistentId: session.userId,
           role: session.userRole,
         });
 
-        // Update stats
+        // Update global dashboard counters
         await statsRepo.decrementActiveSession();
       }
     } catch (err) {

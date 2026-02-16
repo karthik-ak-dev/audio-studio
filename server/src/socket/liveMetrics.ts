@@ -1,20 +1,45 @@
+/**
+ * socket/liveMetrics.ts — Real-time audio quality monitoring during recording.
+ *
+ * While a recording is in progress, each participant's client sends periodic
+ * audio metric snapshots (every ~5s) containing RMS level, peak, clip count,
+ * silence duration, and speech detection status.
+ *
+ * This handler:
+ *   1. Ingests metrics into the in-memory metricsService (running averages)
+ *   2. Checks for quality warnings (e.g., prolonged silence, clipping, low levels)
+ *   3. Broadcasts any warnings to all room participants via RECORDING_WARNING
+ *   4. Sends an aggregated quality update (per-speaker averages) via QUALITY_UPDATE
+ *
+ * Metrics are ephemeral (in-memory only) — they are lost on server restart.
+ * Definitive quality analysis comes from the external processing pipeline
+ * after the recording is uploaded (see processingResultConsumer.ts).
+ *
+ * Also handles UPLOAD_PROGRESS relay — when one participant starts uploading
+ * their recording, progress updates are forwarded to the other participant
+ * so both users see upload status in the UI.
+ */
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import { SOCKET_EVENTS } from '../shared';
 import * as metricsService from '../services/metricsService';
 import { logger } from '../utils/logger';
 
 export function handleLiveMetrics(io: SocketIOServer, socket: Socket): void {
-  // Audio metrics ingestion (every 5s from each participant during recording)
+  // ─── Audio Metrics Ingestion ─────────────────────────────────
+  // Received every ~5s from each participant during an active recording.
+  // Each batch updates the running average and may trigger quality warnings.
   socket.on(SOCKET_EVENTS.AUDIO_METRICS, (data) => {
     try {
       if (!socket.roomId || !data) return;
 
+      // Identify the speaker — prefer email for display, fall back to userId/socketId
       const speaker = socket.userEmail || socket.userId || socket.id;
 
-      // We need a sessionId — get it from recording state context
-      // The client sends the sessionId with metrics, or we default
+      // sessionId links metrics to a specific recording session;
+      // the client sends it (received from START_RECORDING broadcast)
       const sessionId = data.sessionId || 'unknown';
 
+      // Ingest metrics and get back any triggered warnings
       const warnings = metricsService.ingestMetrics(socket.roomId, sessionId, speaker, {
         timestamp: data.timestamp ?? Date.now(),
         rms: data.rms ?? 0,
@@ -24,12 +49,12 @@ export function handleLiveMetrics(io: SocketIOServer, socket: Socket): void {
         speechDetected: data.speechDetected ?? false,
       });
 
-      // Emit warnings to the room
+      // Broadcast any quality warnings (e.g., "Clipping detected", "Silence > 30s")
       for (const warning of warnings) {
         io.to(socket.roomId).emit(SOCKET_EVENTS.RECORDING_WARNING, warning);
       }
 
-      // Emit quality update to the room
+      // Send aggregated quality snapshot (per-speaker running averages)
       const qualityUpdate = metricsService.getQualityUpdate(socket.roomId, sessionId);
       io.to(socket.roomId).emit(SOCKET_EVENTS.QUALITY_UPDATE, qualityUpdate);
     } catch (err) {
@@ -40,7 +65,9 @@ export function handleLiveMetrics(io: SocketIOServer, socket: Socket): void {
     }
   });
 
-  // Upload progress relay
+  // ─── Upload Progress Relay ───────────────────────────────────
+  // When a participant is uploading their recording, relay progress
+  // to the partner so both users see the upload status in the UI.
   socket.on(SOCKET_EVENTS.UPLOAD_PROGRESS, (data) => {
     if (!socket.roomId || !data) return;
     socket.to(socket.roomId).emit(SOCKET_EVENTS.UPLOAD_PROGRESS, data);

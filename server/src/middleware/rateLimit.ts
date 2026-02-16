@@ -1,6 +1,25 @@
+/**
+ * rateLimit.ts — Request rate limiting middleware.
+ *
+ * Three limiters are exported, each targeting different endpoint groups:
+ *
+ *   1. generalLimiter — Applied globally to all routes.
+ *      100 requests/minute per IP. Prevents abuse of any endpoint.
+ *
+ *   2. multipartLimiter — Applied to multipart upload part-URL endpoints.
+ *      10 requests/second per (IP + uploadId). Tighter limit because
+ *      these endpoints are called rapidly during chunked uploads.
+ *
+ *   3. initiateUploadLimiter — Applied to the upload initiation endpoint.
+ *      100 requests/minute per IP. Prevents mass-creation of uploads.
+ *
+ * All limiters return standard RateLimit headers (RateLimit-Limit,
+ * RateLimit-Remaining, RateLimit-Reset) and suppress legacy X-RateLimit headers.
+ */
 import rateLimit from 'express-rate-limit';
 import { logger } from '../utils/logger';
 
+/** Global rate limiter: 100 requests per minute per IP across all routes */
 export const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -13,6 +32,7 @@ export const generalLimiter = rateLimit({
   },
 });
 
+/** Multipart upload rate limiter: 10 requests/second per (IP + uploadId) */
 export const multipartLimiter = rateLimit({
   windowMs: 1000,
   max: 10,
@@ -29,6 +49,7 @@ export const multipartLimiter = rateLimit({
   },
 });
 
+/** Upload initiation rate limiter: 100 requests/minute per IP */
 export const initiateUploadLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,

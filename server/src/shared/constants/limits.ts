@@ -1,4 +1,15 @@
+/**
+ * limits.ts — Business constraints and configuration limits.
+ *
+ * All hard-coded limits, timeouts, rate limits, and allowed content types
+ * are centralized here. This makes it easy to tune the system without
+ * hunting through individual files.
+ *
+ * These values are used across routes (validation), middleware (rate limiting),
+ * services (upload logic), and socket handlers (ping/timeout).
+ */
 export const LIMITS = {
+  /** Maximum users in a single meeting room (1-on-1 recording) */
   MAX_PARTICIPANTS: 2,
 
   MAX_FILE_SIZE: 5 * 1024 * 1024 * 1024, // 5GB

@@ -1,3 +1,20 @@
+/**
+ * s3.ts — S3 client and all S3 operations for audio file storage.
+ *
+ * This module handles:
+ *   - Presigned URL generation for browser-direct uploads and downloads
+ *   - Object metadata checks (HEAD) for verifying uploads
+ *   - Range fetches for reading WAV headers during multipart completion
+ *   - Full multipart upload lifecycle (create, part URLs, complete, abort, list)
+ *   - S3 key generation for organizing recordings by meeting/session
+ *
+ * S3 bucket structure:
+ *   recordings/{meetingId}/{sessionId}/{participant}_{timestamp}.wav  — final recordings
+ *   temp_uploads/{uploadId}_part1.wav  — temporary Part 1 cache for WAV header patching
+ *
+ * The browser never sends audio data through this server — it uploads
+ * directly to S3 via presigned URLs, keeping the server lightweight.
+ */
 import {
   S3Client,
   PutObjectCommand,
@@ -36,7 +53,11 @@ const s3Client = new S3Client(s3Config);
 export const BUCKET_NAME = process.env.S3_BUCKET || 'audio-studio-recordings';
 
 // ─── Presigned URLs ─────────────────────────────────────────────
+// Presigned URLs allow the browser to upload/download directly to/from
+// S3 without routing data through the server. The server only generates
+// the URL; the browser does the actual HTTP PUT/GET to S3.
 
+/** Generate a presigned PUT URL for uploading a file to S3 */
 export async function getPresignedPutUrl(
   key: string,
   contentType: string,
@@ -46,6 +67,7 @@ export async function getPresignedPutUrl(
   return getSignedUrl(s3Client, command, { expiresIn });
 }
 
+/** Generate a presigned GET URL for downloading a file from S3 (default: 1 hour expiry) */
 export async function getPresignedGetUrl(key: string, expiresIn = 3600): Promise<string> {
   const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
   return getSignedUrl(s3Client, command, { expiresIn });
@@ -53,6 +75,7 @@ export async function getPresignedGetUrl(key: string, expiresIn = 3600): Promise
 
 // ─── Object metadata ────────────────────────────────────────────
 
+/** Check if a file exists in S3 and return its metadata. Returns null if not found. */
 export async function getObjectMetadata(key: string) {
   try {
     const command = new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key });
@@ -65,7 +88,11 @@ export async function getObjectMetadata(key: string) {
 }
 
 // ─── Range fetch (for WAV header patching) ──────────────────────
+// Used during multipart upload completion to fetch the first 44 bytes
+// (WAV header) of Part 1 from the temp location, so we can patch in
+// the correct file size before re-uploading it.
 
+/** Fetch a byte range from an S3 object and return it as a Buffer */
 export async function fetchS3Range(key: string, range: string): Promise<Buffer> {
   const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key, Range: range });
   const response = await s3Client.send(command);
@@ -77,7 +104,15 @@ export async function fetchS3Range(key: string, range: string): Promise<Buffer> 
 }
 
 // ─── Multipart upload operations ────────────────────────────────
+// S3 multipart upload splits large files (up to 5GB) into parts that
+// can be uploaded independently and in parallel. The lifecycle is:
+//   1. createMultipartUpload → returns an uploadId
+//   2. getUploadPartUrl (×N) → presigned PUT URLs for each part
+//   3. Client uploads parts directly to S3 via presigned URLs
+//   4. completeMultipartUpload → S3 assembles parts into final object
+// If something goes wrong, abortMultipartUpload cleans up.
 
+/** Initiate a new S3 multipart upload. Returns the uploadId needed for subsequent operations. */
 export async function createMultipartUpload(key: string, contentType: string) {
   const command = new CreateMultipartUploadCommand({
     Bucket: BUCKET_NAME,
@@ -88,6 +123,7 @@ export async function createMultipartUpload(key: string, contentType: string) {
   return { uploadId: result.UploadId!, key };
 }
 
+/** Generate a presigned PUT URL for uploading a specific part */
 export async function getUploadPartUrl(
   key: string,
   uploadId: string,
@@ -103,6 +139,7 @@ export async function getUploadPartUrl(
   return getSignedUrl(s3Client, command, { expiresIn });
 }
 
+/** Upload a Buffer directly as a part (used for WAV header patching of Part 1) */
 export async function uploadPartBuffer(
   key: string,
   uploadId: string,
@@ -120,6 +157,7 @@ export async function uploadPartBuffer(
   return { ETag: result.ETag! };
 }
 
+/** Finalize a multipart upload — S3 assembles all parts into the final object */
 export async function completeMultipartUpload(
   key: string,
   uploadId: string,
@@ -134,6 +172,7 @@ export async function completeMultipartUpload(
   return s3Client.send(command);
 }
 
+/** Cancel a multipart upload and clean up any uploaded parts */
 export async function abortMultipartUpload(key: string, uploadId: string) {
   const command = new AbortMultipartUploadCommand({
     Bucket: BUCKET_NAME,
@@ -143,6 +182,7 @@ export async function abortMultipartUpload(key: string, uploadId: string) {
   await s3Client.send(command);
 }
 
+/** List all uploaded parts for a multipart upload (handles pagination automatically) */
 export async function listParts(key: string, uploadId: string) {
   const allParts: Array<{ PartNumber: number; ETag: string; Size: number; LastModified: Date }> = [];
   let isTruncated = true;
@@ -173,7 +213,15 @@ export async function listParts(key: string, uploadId: string) {
 }
 
 // ─── Key generation ─────────────────────────────────────────────
+// S3 keys follow a hierarchical structure for easy organization:
+//   recordings/{meetingId}/{sessionId}/{participant}_{timestamp}.wav
+//   recordings/{meetingId}/{participant}_{timestamp}.wav  (no session)
+//   temp_uploads/{uploadId}_part1.wav  (temporary Part 1 cache)
 
+/**
+ * Generate the final S3 key for a recording file.
+ * Participant name is sanitized to alphanumeric + underscore + hyphen.
+ */
 export function generateS3Key(
   meetingId: string,
   participantName: string,
@@ -188,6 +236,7 @@ export function generateS3Key(
   return `recordings/${meetingId}/${sanitized}_${timestamp}${extension}`;
 }
 
+/** Generate the temp S3 key where Part 1 is cached before WAV header patching */
 export function getTempS3Key(uploadId: string): string {
   return `temp_uploads/${uploadId}_part1.wav`;
 }

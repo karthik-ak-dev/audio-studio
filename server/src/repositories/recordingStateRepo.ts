@@ -1,7 +1,25 @@
+/**
+ * recordingStateRepo.ts — Data access layer for the RecordingState table.
+ *
+ * DynamoDB Table: AudioStudio_RecordingState
+ * Primary Key:    meetingId (partition key, no sort key)
+ * Model Type:     RecordingState (defined in shared/types/meeting.ts)
+ *
+ * This table stores a singleton recording state per meeting. It tracks:
+ *   - Whether recording is currently active (isRecording)
+ *   - Who started it and when (startedBySocketId, startedByUserId, startedAt)
+ *   - The recording session UUID (groups host+guest recording files)
+ *
+ * Used by:
+ *   - socket/recording.ts: start/stop recording events
+ *   - socket/session.ts: send recording state on join, resume on reconnect
+ *   - getOrCreateDefault: race-safe initialization (conditional write)
+ */
 import { PutCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { docClient, TABLES } from '../infra/dynamodb';
 import type { RecordingState } from '../shared';
 
+/** Get the current recording state for a meeting. Returns null if no state exists yet. */
 export async function getRecordingState(meetingId: string): Promise<RecordingState | null> {
   const result = await docClient.send(
     new GetCommand({
@@ -12,6 +30,7 @@ export async function getRecordingState(meetingId: string): Promise<RecordingSta
   return (result.Item as RecordingState) ?? null;
 }
 
+/** Start recording: create/overwrite the state with isRecording=true and a new sessionId */
 export async function startRecording(
   meetingId: string,
   sessionId: string,
@@ -38,6 +57,7 @@ export async function startRecording(
   return state;
 }
 
+/** Stop recording: set isRecording=false and record the stop timestamp */
 export async function stopRecording(meetingId: string): Promise<void> {
   await docClient.send(
     new UpdateCommand({
@@ -52,6 +72,11 @@ export async function stopRecording(meetingId: string): Promise<void> {
   );
 }
 
+/**
+ * Get existing recording state or create a default (not recording) state.
+ * Uses a conditional put to avoid race conditions when two requests
+ * try to create the default simultaneously — the loser re-fetches.
+ */
 export async function getOrCreateDefault(meetingId: string): Promise<RecordingState> {
   const existing = await getRecordingState(meetingId);
   if (existing) return existing;

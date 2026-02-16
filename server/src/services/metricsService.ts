@@ -1,3 +1,22 @@
+/**
+ * metricsService.ts — Live audio metrics aggregation and warning detection.
+ *
+ * During an active recording, each participant's client sends AudioMetricsBatch
+ * updates (~every 5 seconds) via the AUDIO_METRICS socket event. This service:
+ *
+ *   1. Aggregates batches into per-speaker running averages (SpeakerMetricsAggregate)
+ *   2. Detects quality warnings (clipping, too loud/quiet, silence, overlap)
+ *   3. Estimates a live quality profile (P0-P4) for real-time feedback
+ *   4. Provides quality updates to broadcast back to the room
+ *
+ * IMPORTANT: All metrics are stored in-memory (Map) and are EPHEMERAL.
+ * They are lost when the server pod restarts. This is intentional — the
+ * definitive quality profile is computed by the external processing pipeline
+ * (see processing.ts). These live estimates are just for UI feedback.
+ *
+ * One RoomMetricsAggregate exists per active recording session, keyed by
+ * `{roomId}:{sessionId}`. It's cleaned up when the session ends.
+ */
 import { AUDIO_THRESHOLDS } from '../shared';
 import type {
   AudioMetricsBatch,
@@ -7,7 +26,7 @@ import type {
   QualityProfile,
 } from '../shared';
 
-// In-memory store for live metrics (ephemeral, per-pod)
+// In-memory store for live metrics — ephemeral, per-pod, not shared across pods
 const roomMetrics = new Map<string, RoomMetricsAggregate>();
 
 export function getOrCreateRoom(roomId: string, sessionId: string): RoomMetricsAggregate {
@@ -31,6 +50,11 @@ export function cleanupRoom(roomId: string, sessionId: string): void {
   roomMetrics.delete(`${roomId}:${sessionId}`);
 }
 
+/**
+ * Ingest a batch of audio metrics for a speaker in a room. Updates running
+ * aggregates, checks for warnings, and recalculates the quality profile.
+ * Returns any warnings generated (to be broadcast to the room).
+ */
 export function ingestMetrics(
   roomId: string,
   sessionId: string,
@@ -151,6 +175,11 @@ export function getQualityUpdate(roomId: string, sessionId: string) {
   };
 }
 
+/**
+ * Estimate the quality profile (P0-P4) based on current aggregated metrics.
+ * This is a rough heuristic for real-time UI feedback — the actual profile
+ * is determined by the external processing pipeline with full audio analysis.
+ */
 function estimateProfile(room: RoomMetricsAggregate): QualityProfile {
   const speakers = Object.values(room.speakers);
   if (speakers.length === 0) return 'P0';

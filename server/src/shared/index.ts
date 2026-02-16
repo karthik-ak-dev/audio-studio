@@ -1,3 +1,19 @@
+/**
+ * shared/index.ts — Barrel export for all shared types and constants.
+ *
+ * This module serves as the single import point for the shared layer.
+ * Server code imports from here (e.g., `import { LIMITS, Meeting } from '../shared'`)
+ * rather than reaching into individual files.
+ *
+ * The shared layer contains:
+ *   - Constants: LIMITS, AUDIO_THRESHOLDS, SOCKET_EVENTS, MEETING_STATUSES
+ *   - Domain Types: Meeting, Session, Recording, RecordingState, Participant
+ *   - Socket Payload Types: all event payload interfaces
+ *   - Upload Types: request/response interfaces for the upload REST API
+ *   - Metrics Types: audio quality metric interfaces
+ *   - Processing Types: SQS message interfaces for the processing pipeline
+ */
+
 export { LIMITS } from './constants/limits';
 export type { AllowedContentType } from './constants/limits';
 

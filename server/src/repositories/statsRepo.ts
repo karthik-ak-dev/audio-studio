@@ -1,6 +1,24 @@
+/**
+ * statsRepo.ts — Data access layer for global platform statistics.
+ *
+ * DynamoDB Table: AudioStudio_GlobalStats
+ * Primary Key:    statKey (partition key, no sort key)
+ * Singleton Key:  "GLOBAL" — only one row in the entire table
+ *
+ * Tracks three live counters:
+ *   - activeSessionCount:   total connected users across all meetings
+ *   - activeRecordingCount: meetings currently recording
+ *   - activePairCount:      rooms with 2 connected participants
+ *
+ * All counter updates use DynamoDB's atomic ADD operation, making them
+ * safe for concurrent updates from multiple server pods without locks.
+ *
+ * Exposed via GET /api/stats (auth required) for dashboard monitoring.
+ */
 import { UpdateCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { docClient, TABLES } from '../infra/dynamodb';
 
+/** Singleton key — there's only one stats row in the entire table */
 const STAT_KEY = 'GLOBAL';
 
 interface GlobalStats {

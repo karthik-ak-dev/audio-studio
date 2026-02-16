@@ -1,3 +1,18 @@
+/**
+ * meetingService.ts — Business logic for meeting CRUD and participant assignment.
+ *
+ * This is the service layer between routes/socket handlers and the meetingRepo.
+ * It handles:
+ *   - Input validation (title, emails, names)
+ *   - Meeting creation with UUID generation
+ *   - Race-safe host/guest email assignment (delegates to repo conditional writes)
+ *   - Auto-creation of meetings when users join via socket (getOrCreateMeeting)
+ *
+ * Used by:
+ *   - routes/meetings.ts: REST API endpoints
+ *   - socket/session.ts: auto-create meeting on join-room
+ *   - socket/recording.ts: update meeting status on start/stop recording
+ */
 import { v4 as uuid } from 'uuid';
 import type { Meeting, MeetingStatus } from '../shared';
 import * as meetingRepo from '../repositories/meetingRepo';
@@ -98,6 +113,12 @@ export async function deleteMeeting(meetingId: string): Promise<void> {
   await meetingRepo.deleteMeeting(meetingId);
 }
 
+/**
+ * Get an existing meeting or auto-create one. Used by the socket join-room
+ * handler so users can join a room by ID without pre-creating the meeting
+ * through the REST API. Race-safe: if two users try to create simultaneously,
+ * one wins and the other fetches the winner's record.
+ */
 export async function getOrCreateMeeting(meetingId: string, title?: string): Promise<Meeting> {
   const existing = await meetingRepo.getMeetingById(meetingId);
   if (existing) return existing;

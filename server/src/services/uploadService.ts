@@ -1,3 +1,26 @@
+/**
+ * uploadService.ts — Business logic for audio file uploads.
+ *
+ * Orchestrates two upload strategies:
+ *
+ *   1. Simple Upload (small files):
+ *      generateUploadUrl → client PUTs to S3 → completeUpload
+ *      Creates a Recording entry with status 'completed' immediately.
+ *
+ *   2. Multipart Upload (large files up to 5GB):
+ *      initiateMultipart → getPart1Url (temp cache) → getPartUrl (×N)
+ *      → completeMultipart (with WAV header patching) → Recording status 'completed'
+ *
+ * WAV Header Patching (multipart only):
+ *   WAV files have a header (first 44 bytes) that includes the total file size.
+ *   When streaming a recording, the client doesn't know the final size upfront.
+ *   Part 1 is initially uploaded to a temp S3 location. On completion, we:
+ *     1. Fetch the 44-byte header from the temp location
+ *     2. Calculate total size from all parts
+ *     3. Patch bytes 4-7 (ChunkSize) and 40-43 (Subchunk2Size)
+ *     4. Re-upload the patched header as Part 1 of the real multipart upload
+ *     5. Complete the multipart upload with the corrected Part 1
+ */
 import type { Recording } from '../shared';
 import { LIMITS } from '../shared';
 import * as s3 from '../infra/s3';
@@ -188,7 +211,16 @@ export async function getUploadedParts(key: string, uploadId: string) {
 }
 
 // ─── WAV Header Patching ──────────────────────────────────────────
+// WAV file format (RIFF):
+//   Bytes 0-3:   "RIFF"
+//   Bytes 4-7:   ChunkSize = totalFileSize - 8 (everything after "RIFF" + size field)
+//   Bytes 8-11:  "WAVE"
+//   ...          (format chunk, etc.)
+//   Bytes 36-39: "data"
+//   Bytes 40-43: Subchunk2Size = raw audio data size (totalFileSize - 44)
+//   Bytes 44+:   actual audio samples
 
+/** Patch the WAV header with the correct total file size after all parts are known */
 function patchWavHeader(header: Buffer, totalDataSize: number): Buffer {
   const patched = Buffer.from(header);
   // Bytes 4-7: ChunkSize = totalDataSize - 8 (entire file size minus RIFF header)

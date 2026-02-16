@@ -1,6 +1,28 @@
+/**
+ * greenRoomService.ts — Pre-recording microphone quality evaluation.
+ *
+ * The "green room" is the pre-recording setup phase where participants
+ * check their microphone levels before starting. The client periodically
+ * sends raw mic metrics (RMS, peak, noise floor, clipping status), and
+ * this service evaluates them against the thresholds defined in
+ * shared/constants/thresholds.ts.
+ *
+ * Returns a MicStatus with:
+ *   - level: 'good' | 'too-quiet' | 'too-loud'
+ *   - noiseFloor: 'clean' | 'noisy' | 'unacceptable'
+ *   - clipping: boolean
+ *   - suggestions: human-readable tips for the user
+ *
+ * Used by socket/greenRoom.ts → MIC_CHECK event handler.
+ */
 import { AUDIO_THRESHOLDS } from '../shared';
 import type { MicCheckMetrics, MicStatus } from '../shared';
 
+/**
+ * Evaluate mic check metrics and return a classification with suggestions.
+ * Compares RMS against MIC_TOO_QUIET/MIC_TOO_LOUD thresholds and noise floor
+ * against NOISE_FLOOR_NOISY/NOISE_FLOOR_REJECT thresholds.
+ */
 export function evaluate(metrics: MicCheckMetrics): MicStatus {
   // Evaluate volume level
   const level: MicStatus['level'] =

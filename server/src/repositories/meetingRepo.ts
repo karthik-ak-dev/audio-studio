@@ -1,8 +1,25 @@
+/**
+ * meetingRepo.ts — Data access layer for the Meetings table.
+ *
+ * DynamoDB Table: AudioStudio_Meetings
+ * Primary Key:    meetingId (partition key, no sort key)
+ * Model Type:     Meeting (defined in shared/types/meeting.ts)
+ *
+ * Operations:
+ *   - CRUD: create, get by ID, get all, update status, delete
+ *   - Role assignment: assignHostEmail, assignGuestEmail (race-safe with conditional writes)
+ *   - Role lookup: getParticipantRole (determines host/guest by email match)
+ *
+ * Race safety: Host and guest assignment use DynamoDB conditional expressions
+ * to prevent two concurrent requests from overwriting each other's assignment.
+ * If the slot is already taken, the write fails gracefully and returns false.
+ */
 import { PutCommand, GetCommand, UpdateCommand, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { docClient, TABLES } from '../infra/dynamodb';
 import type { Meeting, MeetingStatus } from '../shared';
 import { logger } from '../utils/logger';
 
+/** Create a new meeting. Fails if meetingId already exists (conditional write). */
 export async function createMeeting(meeting: Meeting): Promise<void> {
   await docClient.send(
     new PutCommand({
@@ -46,6 +63,10 @@ export async function updateMeetingStatus(meetingId: string, status: MeetingStat
   );
 }
 
+/**
+ * Race-safe host email assignment. Uses a conditional write that only
+ * succeeds if hostEmail is not yet set. Returns false if already assigned.
+ */
 export async function assignHostEmail(meetingId: string, email: string): Promise<boolean> {
   try {
     await docClient.send(
@@ -66,6 +87,10 @@ export async function assignHostEmail(meetingId: string, email: string): Promise
   }
 }
 
+/**
+ * Race-safe guest email assignment for slot A or B. Uses a conditional
+ * write that only succeeds if the target slot is not yet assigned.
+ */
 export async function assignGuestEmail(
   meetingId: string,
   slot: 'A' | 'B',
@@ -104,6 +129,7 @@ export async function deleteMeeting(meetingId: string): Promise<void> {
   logger.info('Meeting deleted', { meetingId });
 }
 
+/** Determine a user's role (host/guest) by matching their email against the meeting record */
 export async function getParticipantRole(
   meetingId: string,
   email: string,
