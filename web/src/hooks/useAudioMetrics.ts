@@ -1,5 +1,5 @@
 /**
- * useAudioMetrics.ts — Real-time audio level analysis hook.
+ * useAudioMetrics.ts — Real-time audio level analysis hook with EMA smoothing.
  *
  * Provides live RMS, peak, clipping, silence, and speech detection metrics
  * from a MediaStream. Used in both the GreenRoom (mic check) and Studio
@@ -14,45 +14,47 @@
  *    from the AnalyserNode and passes them to `computeMetrics()` from
  *    metricsService.
  *
- * 3. The computed metrics (RMS dBFS, peak dBFS, clip count, silence
- *    duration, speech detection) are stored in React state for rendering.
+ * 3. Raw metrics are smoothed using Exponential Moving Average (EMA)
+ *    to prevent visual jitter while preserving responsiveness.
  *
  * 4. `stopMetrics()` tears down the audio pipeline and cancels the rAF loop.
  *
- * ## Audio Pipeline
+ * ## EMA Smoothing
  *
- *   AudioContext (48kHz) → MediaStreamSource → AnalyserNode (FFT 2048)
- *                                                    ↓
- *                                          getFloatTimeDomainData()
- *                                                    ↓
- *                                            computeMetrics(samples)
- *                                                    ↓
- *                                        { rms, peak, clipCount, ... }
- *
- * ## Why 48kHz?
- *
- * Matches the recording pipeline sample rate. If the AudioContext ran at
- * a different rate, the AnalyserNode would resample, and the metrics
- * (especially clip detection) could differ from the actual recording.
- *
- * ## Cleanup
- *
- * The useEffect cleanup closes the AudioContext and cancels rAF on unmount,
- * preventing memory leaks from orphaned audio nodes.
+ * Raw dBFS values jump drastically frame-to-frame (e.g. -45 → -20 → -38).
+ * We apply separate EMA coefficients for attack (fast rise) and release
+ * (slow decay), mimicking professional VU/PPM meters:
+ *   - Attack α = 0.3 (fast response to level increases)
+ *   - Release α = 0.08 (slow decay for readable display)
+ *   - Peak uses separate slow-decay with hold for transient visibility
  */
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { computeMetrics, resetMetrics } from '@/services/metricsService';
 import type { AudioMetrics } from '@/services/metricsService';
 
+export interface SmoothedAudioMetrics extends AudioMetrics {
+  /** EMA-smoothed RMS in dBFS — use this for visual display */
+  smoothRms: number;
+  /** Slow-decaying peak in dBFS — use this for peak hold indicator */
+  smoothPeak: number;
+}
+
 export interface UseAudioMetricsReturn {
-  metrics: AudioMetrics | null;
+  metrics: SmoothedAudioMetrics | null;
   startMetrics: (stream: MediaStream) => void;
   stopMetrics: () => void;
 }
 
+/** EMA coefficient for rising levels (fast attack) */
+const ATTACK_ALPHA = 0.3;
+/** EMA coefficient for falling levels (slow release) */
+const RELEASE_ALPHA = 0.08;
+/** EMA coefficient for peak decay (very slow for peak hold effect) */
+const PEAK_RELEASE_ALPHA = 0.05;
+
 export function useAudioMetrics(): UseAudioMetricsReturn {
-  const [metrics, setMetrics] = useState<AudioMetrics | null>(null);
+  const [metrics, setMetrics] = useState<SmoothedAudioMetrics | null>(null);
 
   /** Web Audio context — 48kHz to match recording pipeline */
   const contextRef = useRef<AudioContext | null>(null);
@@ -62,6 +64,9 @@ export function useAudioMetrics(): UseAudioMetricsReturn {
 
   /** requestAnimationFrame handle for the metrics loop */
   const rafRef = useRef<number>(0);
+
+  /** Smoothed values persisted across frames */
+  const smoothRef = useRef({ rms: -60, peak: -60 });
 
   /**
    * Start the metrics pipeline.
@@ -77,6 +82,7 @@ export function useAudioMetrics(): UseAudioMetricsReturn {
 
     contextRef.current = ctx;
     analyserRef.current = analyser;
+    smoothRef.current = { rms: -60, peak: -60 };
     resetMetrics(); // Clear silence/speech tracking state
 
     const buffer = new Float32Array(analyser.fftSize);
@@ -84,8 +90,30 @@ export function useAudioMetrics(): UseAudioMetricsReturn {
     /** rAF loop — runs at display refresh rate (~60fps) */
     const tick = () => {
       analyser.getFloatTimeDomainData(buffer);
-      const m = computeMetrics(buffer);
-      setMetrics(m);
+      const raw = computeMetrics(buffer);
+
+      // Clamp raw values to usable range for smoothing
+      const rawRms = Math.max(-60, raw.rms === -Infinity ? -60 : raw.rms);
+      const rawPeak = Math.max(-60, raw.peak === -Infinity ? -60 : raw.peak);
+
+      const prev = smoothRef.current;
+
+      // EMA with separate attack/release coefficients
+      const rmsAlpha = rawRms > prev.rms ? ATTACK_ALPHA : RELEASE_ALPHA;
+      const smoothRms = prev.rms + rmsAlpha * (rawRms - prev.rms);
+
+      // Peak: fast attack, very slow release (peak hold effect)
+      const peakAlpha = rawPeak > prev.peak ? ATTACK_ALPHA : PEAK_RELEASE_ALPHA;
+      const smoothPeak = prev.peak + peakAlpha * (rawPeak - prev.peak);
+
+      smoothRef.current = { rms: smoothRms, peak: smoothPeak };
+
+      setMetrics({
+        ...raw,
+        smoothRms,
+        smoothPeak,
+      });
+
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);

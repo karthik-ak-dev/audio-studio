@@ -1,109 +1,122 @@
 /**
- * GreenRoom.tsx — Microphone test page before entering the recording studio.
+ * GreenRoom.tsx — Step-by-step sound check before entering the recording studio.
  *
- * This page sits between Home and Studio in the user journey:
- *   Home → GreenRoom (this page) → Studio → Results
+ * Guides the user through 3 sequential checks:
+ *   1. Microphone — Device detected and stream acquired
+ *   2. Level Check — Accumulated evidence that mic produces good levels
+ *   3. Environment — Noise floor evaluation
  *
- * ## What it does
+ * Uses accumulated evidence (rolling window of server responses) instead of
+ * single-snapshot evaluation, so pauses between sentences don't reset progress.
  *
- * 1. **Device Selection** — Enumerates audio input devices and lets the user
- *    choose their microphone via the DeviceSelector component.
- *
- * 2. **Mic Stream Acquisition** — When a device is selected, requests a
- *    MediaStream with raw audio settings (no echo cancellation or noise
- *    suppression, 48kHz sample rate) to match the recording pipeline.
- *
- * 3. **Real-time Level Monitoring** — Feeds the stream into useAudioMetrics,
- *    which uses a Web Audio AnalyserNode to compute RMS/peak levels at
- *    ~60fps. The VolumeIndicator component renders these as a visual meter.
- *
- * 4. **Server-side Mic Evaluation** — Every 1 second, sends a `mic-check`
- *    event to the server with { rms, peak, noiseFloor, isClipping }.
- *    The server evaluates these against AUDIO_THRESHOLDS and responds with
- *    a `mic-status` event containing:
- *      - level: 'good' | 'too-quiet' | 'too-loud'
- *      - noiseFloor: 'clean' | 'noisy' | 'unacceptable'
- *      - suggestions: string[] (contextual tips)
- *
- * 5. **Gate to Studio** — The "I'm Ready" button is only enabled when the
- *    server reports level === 'good' AND noiseFloor !== 'unacceptable'.
- *    On click, the mic stream is stopped (Studio will acquire its own)
- *    and the user navigates to /room/:roomId.
- *
- * ## Socket.IO usage
- *
- * The GreenRoom creates its own Socket.IO connection for mic-check only.
- * It does NOT join a room — the server's mic-check handler evaluates
- * metrics and responds directly to the sender socket. On unmount, the
- * socket is disconnected so Studio can establish a fresh connection.
- *
- * ## Backend events used
- *
- * Client → Server:
- *   `mic-check` — { rms, peak, noiseFloor, isClipping } (every 1s)
- *
- * Server → Client:
- *   `mic-status` — { level, noiseFloor, clipping, suggestions }
+ * Flow: Home → GreenRoom (this page) → Studio → Results
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { SOCKET_EVENTS } from '../shared';
+import type { MicStatus } from '../shared';
 import { useAudioMetrics } from '@/hooks/useAudioMetrics';
 import VolumeIndicator from '@/components/VolumeIndicator';
 import DeviceSelector from '@/components/DeviceSelector';
 import { connectSocket, disconnectSocket } from '@/services/socketService';
 
+// ── Types ────────────────────────────────────────────────────
+
+type CheckPhase = 'device' | 'level' | 'environment' | 'ready';
+type CheckStatus = 'pending' | 'active' | 'passed' | 'failed';
+
+interface CheckState {
+  device: CheckStatus;
+  level: CheckStatus;
+  environment: CheckStatus;
+}
+
+// ── Constants ────────────────────────────────────────────────
+
+/** Number of mic-status responses to keep in the rolling window */
+const HISTORY_SIZE = 6;
+/** Number of "good" level responses needed to pass the level check */
+const GOOD_THRESHOLD = 2;
+/** Milliseconds before showing a hint if no good frames detected */
+const LEVEL_HINT_DELAY = 10_000;
+/** Minimum ms to show a step as active before auto-advancing */
+const MIN_STEP_DISPLAY = 600;
+
+// ── Component ────────────────────────────────────────────────
+
 export default function GreenRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
 
-  /** Currently selected microphone device ID */
+  // ── Device state ───────────────────────────────────────────
   const [deviceId, setDeviceId] = useState<string>('');
-
-  /** Active MediaStream from the selected mic — stopped on unmount or device change */
+  const [deviceLabel, setDeviceLabel] = useState<string>('');
   const [stream, setStream] = useState<MediaStream | null>(null);
 
-  /**
-   * Server's assessment of the user's mic quality.
-   * null until the first mic-status event arrives (~1s after metrics start).
-   */
-  const [micStatus, setMicStatus] = useState<{
-    level: string;
-    noiseFloor: string;
-    suggestions: string[];
-  } | null>(null);
+  // ── Phase state machine ────────────────────────────────────
+  const [phase, setPhase] = useState<CheckPhase>('device');
+  const [checkState, setCheckState] = useState<CheckState>({
+    device: 'active',
+    level: 'pending',
+    environment: 'pending',
+  });
 
-  const [isReady, setIsReady] = useState(false);
+  // ── Audio metrics ──────────────────────────────────────────
   const { metrics, startMetrics, stopMetrics } = useAudioMetrics();
 
-  /**
-   * Connect to Socket.IO eagerly so we can start sending mic-check events.
-   * This is a singleton — connectSocket() returns the existing socket if
-   * one is already connected.
-   */
+  // ── Socket ─────────────────────────────────────────────────
   const socketRef = useRef(connectSocket());
 
-  /**
-   * Acquire a new mic stream whenever the selected device changes.
-   *
-   * Audio constraints deliberately disable browser processing:
-   *   - echoCancellation: false  → we want raw audio, not processed
-   *   - noiseSuppression: false  → server evaluates noise separately
-   *   - sampleRate: 48000        → matches the recording pipeline
-   *
-   * The previous stream's tracks are stopped before acquiring a new one
-   * to release the old device handle.
-   */
+  // ── Refs for interval access ───────────────────────────────
+  const metricsRef = useRef(metrics);
+  metricsRef.current = metrics;
+
+  // ── Noise floor estimator (EMA on quiet frames) ────────────
+  const noiseFloorRef = useRef(-60);
+  useEffect(() => {
+    if (!metrics) return;
+    const rms = metrics.rms === -Infinity ? -80 : metrics.rms;
+    const prev = noiseFloorRef.current;
+    if (rms < -35) {
+      noiseFloorRef.current = prev + 0.1 * (rms - prev);
+    }
+  }, [metrics]);
+
+  // ── Evidence accumulation ──────────────────────────────────
+  const statusHistoryRef = useRef<MicStatus[]>([]);
+  const [goodFrameCount, setGoodFrameCount] = useState(0);
+  const [latestStatus, setLatestStatus] = useState<MicStatus | null>(null);
+  const [noiseResult, setNoiseResult] = useState<MicStatus['noiseFloor'] | null>(null);
+  const [showLevelHint, setShowLevelHint] = useState(false);
+  const levelHintTimerRef = useRef<number>(0);
+
+  // ── Minimum display time guard ─────────────────────────────
+  const phaseEnteredAtRef = useRef(Date.now());
+
+  // ── Device change handler (resets all checks) ──────────────
+  const handleDeviceChange = useCallback((newDeviceId: string) => {
+    setDeviceId(newDeviceId);
+    setPhase('device');
+    setCheckState({ device: 'active', level: 'pending', environment: 'pending' });
+    statusHistoryRef.current = [];
+    setGoodFrameCount(0);
+    setLatestStatus(null);
+    setNoiseResult(null);
+    setShowLevelHint(false);
+    window.clearTimeout(levelHintTimerRef.current);
+  }, []);
+
+  // ── Acquire mic stream on device change ────────────────────
   useEffect(() => {
     if (!deviceId) return;
 
     let currentStream: MediaStream | null = null;
 
     async function getMic() {
-      // Stop previous stream to release the device
       stream?.getTracks().forEach((t) => t.stop());
       stopMetrics();
+      noiseFloorRef.current = -60;
 
       const s = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -116,6 +129,10 @@ export default function GreenRoom() {
       currentStream = s;
       setStream(s);
       startMetrics(s);
+
+      // Capture device label for display
+      const track = s.getAudioTracks()[0];
+      setDeviceLabel(track?.label || 'Microphone');
     }
 
     getMic();
@@ -125,156 +142,334 @@ export default function GreenRoom() {
     };
   }, [deviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /**
-   * Send mic-check metrics to the server every 1 second.
-   *
-   * The server's evaluateMicCheck() compares these against AUDIO_THRESHOLDS:
-   *   - rms < -40dBFS → 'too-quiet'
-   *   - rms > -6dBFS  → 'too-loud'
-   *   - noiseFloor > -30dBFS → 'unacceptable'
-   *
-   * Note: We approximate noiseFloor as the current RMS. A proper noise floor
-   * measurement would require a longer silence sample, but for a quick
-   * green-room check this is sufficient.
-   */
+  // ── Send mic-check to server every 1 second ────────────────
   useEffect(() => {
-    if (!metrics || !socketRef.current) return;
+    const socket = socketRef.current;
+    if (!socket) return;
 
     const interval = setInterval(() => {
-      if (metrics) {
-        socketRef.current.emit(SOCKET_EVENTS.MIC_CHECK, {
-          rms: metrics.rms,
-          peak: metrics.peak,
-          noiseFloor: metrics.rms, // Approximation — real noise floor needs longer analysis
-          isClipping: metrics.clipCount > 0,
-        });
-      }
+      const m = metricsRef.current;
+      if (!m) return;
+
+      socket.emit(SOCKET_EVENTS.MIC_CHECK, {
+        rms: m.rms,
+        peak: m.peak,
+        noiseFloor: noiseFloorRef.current,
+        isClipping: m.clipCount > 0,
+      });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [metrics]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /**
-   * Listen for the server's mic quality assessment.
-   * The server sends this in response to each mic-check event.
-   */
+  // ── Listen for server mic-status responses ─────────────────
   useEffect(() => {
     const socket = socketRef.current;
-    socket.on(SOCKET_EVENTS.MIC_STATUS, (data: any) => {
-      setMicStatus(data);
-    });
-    return () => {
-      socket.off(SOCKET_EVENTS.MIC_STATUS);
-    };
-  }, []);
+    const handler = (data: MicStatus) => {
+      setLatestStatus(data);
 
-  /**
-   * "I'm Ready" handler — stops the mic stream and metrics, then
-   * navigates to the Studio page. The Studio will acquire its own
-   * fresh MediaStream on mount.
-   */
+      // Only accumulate during level/environment phases
+      if (phase !== 'level' && phase !== 'environment') return;
+
+      statusHistoryRef.current = [
+        ...statusHistoryRef.current.slice(-(HISTORY_SIZE - 1)),
+        data,
+      ];
+
+      const good = statusHistoryRef.current.filter((s) => s.level === 'good').length;
+      setGoodFrameCount(good);
+      setNoiseResult(data.noiseFloor);
+    };
+
+    socket.on(SOCKET_EVENTS.MIC_STATUS, handler);
+    return () => {
+      socket.off(SOCKET_EVENTS.MIC_STATUS, handler);
+    };
+  }, [phase]);
+
+  // ── Phase transitions ──────────────────────────────────────
+
+  // device → level (when stream acquired)
+  useEffect(() => {
+    if (phase === 'device' && stream) {
+      phaseEnteredAtRef.current = Date.now();
+      setCheckState({ device: 'passed', level: 'active', environment: 'pending' });
+      setPhase('level');
+      levelHintTimerRef.current = window.setTimeout(
+        () => setShowLevelHint(true),
+        LEVEL_HINT_DELAY,
+      );
+    }
+  }, [phase, stream]);
+
+  // level → environment (when enough good frames)
+  useEffect(() => {
+    if (phase === 'level' && goodFrameCount >= GOOD_THRESHOLD) {
+      window.clearTimeout(levelHintTimerRef.current);
+      setShowLevelHint(false);
+
+      const elapsed = Date.now() - phaseEnteredAtRef.current;
+      const delay = Math.max(0, MIN_STEP_DISPLAY - elapsed);
+
+      setTimeout(() => {
+        phaseEnteredAtRef.current = Date.now();
+        setCheckState((prev) => ({ ...prev, level: 'passed', environment: 'active' }));
+        setPhase('environment');
+      }, delay);
+    }
+  }, [phase, goodFrameCount]);
+
+  // environment → ready (once noise result arrives)
+  useEffect(() => {
+    if (phase === 'environment' && noiseResult !== null) {
+      const elapsed = Date.now() - phaseEnteredAtRef.current;
+      const delay = Math.max(0, MIN_STEP_DISPLAY - elapsed);
+
+      setTimeout(() => {
+        if (noiseResult !== 'unacceptable') {
+          setCheckState((prev) => ({ ...prev, environment: 'passed' }));
+          setPhase('ready');
+        } else {
+          setCheckState((prev) => ({ ...prev, environment: 'failed' }));
+        }
+      }, delay);
+    }
+  }, [phase, noiseResult]);
+
+  // ── Navigate to Studio ─────────────────────────────────────
   const handleReady = useCallback(() => {
-    setIsReady(true);
     stopMetrics();
     stream?.getTracks().forEach((t) => t.stop());
     navigate(`/room/${roomId}`);
   }, [roomId, navigate, stopMetrics, stream]);
 
-  /**
-   * Cleanup on unmount: stop metrics, release mic, disconnect socket.
-   * The socket disconnect is intentional — Studio will create a fresh
-   * connection so it starts with a clean event listener slate.
-   */
+  // ── Retry environment check ────────────────────────────────
+  const handleRetryEnvironment = useCallback(() => {
+    statusHistoryRef.current = [];
+    noiseFloorRef.current = -60;
+    setNoiseResult(null);
+    setCheckState((prev) => ({ ...prev, environment: 'active' }));
+    setPhase('environment');
+  }, []);
+
+  // ── Cleanup on unmount ─────────────────────────────────────
   useEffect(() => {
     return () => {
       stopMetrics();
       stream?.getTracks().forEach((t) => t.stop());
       disconnectSocket();
+      window.clearTimeout(levelHintTimerRef.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Gate conditions: mic level must be 'good' and noise floor not 'unacceptable' */
-  const levelOk = micStatus?.level === 'good';
-  const noiseOk = micStatus?.noiseFloor !== 'unacceptable';
-  const canProceed = levelOk && noiseOk;
+  // ── Render ─────────────────────────────────────────────────
 
   return (
     <div className="flex items-center justify-center min-h-screen p-4">
-      <div className="w-full max-w-lg space-y-6">
+      <div className="w-full max-w-xl space-y-6">
+        {/* Header */}
         <div className="text-center">
-          <h1 className="mb-1 text-2xl font-bold text-white">Green Room</h1>
-          <p className="text-gray-400">Test your microphone before recording</p>
+          <h1 className="mb-1 text-2xl font-bold text-white">Sound Check</h1>
+          <p className="text-sm text-gray-400">
+            Let's make sure your microphone is working well
+          </p>
         </div>
 
-        <div className="p-6 space-y-6 bg-gray-900 border border-gray-800 rounded-xl">
-          {/* ── Device selection dropdown ───────────────────────── */}
-          <DeviceSelector onDeviceSelected={setDeviceId} selectedDeviceId={deviceId} />
+        <div className="p-6 bg-gray-900 border border-gray-800 rounded-xl">
+          {/* Step 1: Microphone */}
+          <StepItem
+            stepNumber={1}
+            label="Microphone"
+            status={checkState.device}
+            statusText={checkState.device === 'passed' ? deviceLabel : undefined}
+            isLast={false}
+          >
+            <DeviceSelector
+              onDeviceSelected={handleDeviceChange}
+              selectedDeviceId={deviceId}
+            />
+          </StepItem>
 
-          {/* ── Real-time volume meter ─────────────────────────── */}
-          {metrics && (
-            <div>
-              <label className="block mb-2 text-sm text-gray-400">Input Level</label>
-              <VolumeIndicator
-                rmsDb={metrics.rms}
-                peakDb={metrics.peak}
-                isClipping={metrics.clipCount > 0}
-              />
-            </div>
-          )}
+          {/* Step 2: Level Check */}
+          <StepItem
+            stepNumber={2}
+            label="Level Check"
+            status={checkState.level}
+            statusText={
+              checkState.level === 'passed' ? 'Mic level sounds good' : undefined
+            }
+            isLast={false}
+          >
+            <div className="space-y-3">
+              <p className="text-sm text-gray-300">
+                {goodFrameCount === 0
+                  ? 'Say something to test your microphone...'
+                  : goodFrameCount < GOOD_THRESHOLD
+                    ? 'Keep talking for a moment...'
+                    : 'Your mic level is good!'}
+              </p>
 
-          {/* ── Server mic status feedback ─────────────────────── */}
-          {micStatus && (
-            <div className="space-y-2">
-              <div className="flex gap-3">
-                <StatusBadge label="Level" status={micStatus.level === 'good' ? 'good' : 'bad'} />
-                <StatusBadge
-                  label="Noise"
-                  status={micStatus.noiseFloor === 'clean' ? 'good' : micStatus.noiseFloor === 'noisy' ? 'warn' : 'bad'}
+              {metrics && (
+                <VolumeIndicator
+                  rmsDb={metrics.smoothRms}
+                  peakDb={metrics.smoothPeak}
+                  isClipping={metrics.clipCount > 0}
+                  hideLabels
                 />
+              )}
+
+              {/* Evidence dots */}
+              <div className="flex items-center gap-1.5">
+                {Array.from({ length: GOOD_THRESHOLD }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`w-2 h-2 rounded-full transition-colors duration-300 ${
+                      i < goodFrameCount ? 'bg-green-400' : 'bg-gray-700'
+                    }`}
+                  />
+                ))}
+                <span className="ml-1 text-xs text-gray-600">
+                  {goodFrameCount}/{GOOD_THRESHOLD}
+                </span>
               </div>
 
-              {/* Server-provided suggestions (e.g. "Move closer to microphone") */}
-              {micStatus.suggestions.length > 0 && (
-                <ul className="space-y-1 text-sm text-gray-300">
-                  {micStatus.suggestions.map((s, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <span className="text-gray-500 mt-0.5">-</span>
-                      {s}
-                    </li>
-                  ))}
-                </ul>
+              {/* Hint after timeout with no good frames */}
+              {showLevelHint && latestStatus && (
+                <div className="px-3 py-2 text-sm border rounded-lg bg-yellow-950/30 border-yellow-800/40 text-yellow-300">
+                  {latestStatus.level === 'too-quiet'
+                    ? 'We can barely hear you. Try moving closer to your microphone or increasing the input volume.'
+                    : latestStatus.level === 'too-loud'
+                      ? 'Your microphone is too loud. Try moving back or reducing the input volume.'
+                      : 'Try speaking at a normal conversational volume.'}
+                </div>
               )}
             </div>
-          )}
+          </StepItem>
 
-          {/* ── Ready button — gated on mic quality ────────────── */}
-          <button
-            onClick={handleReady}
-            disabled={!canProceed && micStatus !== null}
-            className="w-full py-3 font-medium text-white transition-colors rounded-lg bg-studio-600 hover:bg-studio-700 disabled:opacity-50"
+          {/* Step 3: Environment */}
+          <StepItem
+            stepNumber={3}
+            label="Environment"
+            status={checkState.environment}
+            statusText={
+              checkState.environment === 'passed'
+                ? noiseResult === 'noisy'
+                  ? 'Some background noise -- consider a quieter room'
+                  : 'Your room sounds quiet'
+                : checkState.environment === 'failed'
+                  ? 'Too much background noise'
+                  : undefined
+            }
+            isLast
           >
-            {!micStatus ? 'Checking microphone...' : canProceed ? "I'm Ready" : 'Fix issues before continuing'}
-          </button>
+            {checkState.environment === 'active' && (
+              <p className="text-sm text-gray-400">Checking background noise...</p>
+            )}
+            {checkState.environment === 'failed' && (
+              <div className="space-y-2">
+                <p className="text-sm text-red-300">
+                  Please move to a quieter space. Background noise will affect
+                  recording quality.
+                </p>
+                <button
+                  onClick={handleRetryEnvironment}
+                  className="px-3 py-1.5 text-sm text-white rounded-md bg-gray-700 hover:bg-gray-600"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </StepItem>
+
+          {/* Ready button */}
+          <div className="pt-4 mt-2 border-t border-gray-800">
+            <button
+              onClick={handleReady}
+              disabled={phase !== 'ready'}
+              className={`w-full py-3 font-medium text-white rounded-lg transition-all ${
+                phase === 'ready'
+                  ? 'bg-studio-600 hover:bg-studio-700 shadow-lg shadow-studio-600/20'
+                  : 'bg-gray-700 opacity-60 cursor-not-allowed'
+              }`}
+            >
+              {phase === 'ready'
+                ? "I'm Ready"
+                : phase === 'device'
+                  ? 'Select a microphone'
+                  : checkState.environment === 'failed'
+                    ? 'Fix issues above to continue'
+                    : 'Complete the checks above'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-/**
- * StatusBadge — Small colored pill showing mic check status.
- * Used for both the "Level" and "Noise" indicators.
- */
-function StatusBadge({ label, status }: { label: string; status: 'good' | 'warn' | 'bad' }) {
-  const colors = {
-    good: 'bg-green-900/50 text-green-300 border-green-700',
-    warn: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
-    bad: 'bg-red-900/50 text-red-300 border-red-700',
-  };
+// ── StepItem Component ───────────────────────────────────────
+
+function StepItem({
+  stepNumber,
+  label,
+  status,
+  statusText,
+  isLast,
+  children,
+}: {
+  stepNumber: number;
+  label: string;
+  status: CheckStatus;
+  statusText?: string;
+  isLast: boolean;
+  children?: React.ReactNode;
+}) {
+  const isExpanded = status === 'active' || status === 'failed';
+
+  const iconStyle = {
+    pending: 'bg-gray-700 text-gray-500',
+    active: 'bg-studio-600 text-white ring-2 ring-studio-400/30',
+    passed: 'bg-green-600 text-white',
+    failed: 'bg-red-600 text-white',
+  }[status];
+
+  const icon = {
+    pending: String(stepNumber),
+    active: String(stepNumber),
+    passed: '\u2713',
+    failed: '\u2717',
+  }[status];
 
   return (
-    <span className={`px-3 py-1 rounded-lg border text-sm ${colors[status]}`}>
-      {label}: {status === 'good' ? 'OK' : status === 'warn' ? 'Warning' : 'Issue'}
-    </span>
+    <div className={`relative pl-10 ${isLast ? '' : 'pb-6'}`}>
+      {/* Vertical connector line */}
+      {!isLast && (
+        <div className="absolute left-[15px] top-8 bottom-0 w-px bg-gray-800" />
+      )}
+
+      {/* Step circle */}
+      <div
+        className={`absolute left-0 top-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${iconStyle}`}
+      >
+        {icon}
+      </div>
+
+      {/* Label row */}
+      <div className="flex items-center gap-2 h-8">
+        <span
+          className={`font-medium ${
+            status === 'pending' ? 'text-gray-500' : 'text-white'
+          }`}
+        >
+          {label}
+        </span>
+        {statusText && (
+          <span className="text-sm text-gray-400">&middot; {statusText}</span>
+        )}
+      </div>
+
+      {/* Expandable content */}
+      {isExpanded && children && <div className="mt-3">{children}</div>}
+    </div>
   );
 }

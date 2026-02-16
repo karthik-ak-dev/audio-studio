@@ -478,8 +478,8 @@ export default function Studio() {
             <div>
               <label className="block mb-2 text-sm text-gray-400">Your Audio Level</label>
               <VolumeIndicator
-                rmsDb={metrics.rms}
-                peakDb={metrics.peak}
+                rmsDb={metrics.smoothRms}
+                peakDb={metrics.smoothPeak}
                 isClipping={metrics.clipCount > 0}
               />
             </div>
