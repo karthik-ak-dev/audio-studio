@@ -1,4 +1,69 @@
-// Client-side multipart upload service
+/**
+ * uploadService.ts — Client-side file upload to S3 via server presigned URLs.
+ *
+ * Handles uploading recorded WAV files to S3, automatically choosing between
+ * simple upload (≤10MB) and multipart upload (>10MB) based on file size.
+ *
+ * ## Simple Upload Flow (files ≤ 10MB)
+ *
+ * 1. POST /api/upload/url → Get presigned S3 PUT URL (15-min expiry)
+ *    Body: { roomId, participantName, sessionId, contentType: 'audio/wav' }
+ *    Response: { uploadUrl, key }
+ *
+ * 2. PUT blob to uploadUrl (direct to S3, bypasses server)
+ *
+ * 3. POST /api/upload/complete → Mark upload finished in DynamoDB
+ *    Body: { roomId, participantName, key, sessionId }
+ *    This creates a Recording entry with status='completed' and triggers
+ *    `triggerProcessingIfReady()` which checks if both host+guest uploads
+ *    are done, then publishes to SQS for processing.
+ *
+ * ## Multipart Upload Flow (files > 10MB)
+ *
+ * 1. POST /api/multipart-upload/initiate → Start multipart upload
+ *    Body: { roomId, participantName, contentType, fileSize }
+ *    Response: { uploadId, key, expiresAt }
+ *
+ * 2. **Part 1 (special handling):**
+ *    POST /api/multipart-upload/part-1 → Get temp presigned URL
+ *    Body: { uploadId }
+ *    Response: { url, tempKey }
+ *    Upload Part 1 to temp location (for WAV header patching later).
+ *    ALSO upload Part 1 to the actual multipart upload location.
+ *
+ *    Why? The WAV header (first 44 bytes) contains ChunkSize and Subchunk2Size
+ *    fields that must match the total file size. During streaming recording,
+ *    the client doesn't know the final size upfront. The server patches these
+ *    fields from the temp copy during multipart completion.
+ *
+ * 3. **Parts 2-N (parallel):**
+ *    POST /api/multipart-upload/part-url → Get presigned URL per part
+ *    Body: { key, uploadId, partNumber }
+ *    Response: { url }
+ *    PUT each 10MB part directly to S3 (3 concurrent uploads)
+ *
+ * 4. POST /api/multipart-upload/complete → Finalize
+ *    Body: { key, uploadId, parts: [{PartNumber, ETag}], roomId, participantName, sessionId }
+ *    Server: patches WAV header from temp, completes S3 multipart, creates Recording entry
+ *
+ * ## Resume Support
+ *
+ * Upload state (uploadId, completed parts) is persisted in IndexedDB via
+ * storageService. If the upload is interrupted:
+ * 1. On retry, check IndexedDB for saved state
+ * 2. Verify with server: GET /api/multipart-upload/parts?key=...&uploadId=...
+ * 3. Skip already-uploaded parts, resume from where we left off
+ *
+ * ## Fallback
+ *
+ * If multipart upload fails at any step, falls back to simple upload.
+ * This handles edge cases like expired presigned URLs or S3 errors.
+ *
+ * ## Rate Limiting (server-side)
+ *
+ * - multipart-upload/part-url: 10 req/sec per (IP + uploadId)
+ * - multipart-upload/initiate: 100 req/min per IP
+ */
 
 import {
   saveUploadState,
@@ -9,17 +74,32 @@ import {
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export interface UploadProgress {
-  loaded: number;
-  total: number;
-  percent: number;
-  partNumber: number;
+  loaded: number;       // Bytes uploaded so far
+  total: number;        // Total file size in bytes
+  percent: number;      // 0-100 integer
+  partNumber: number;   // Current part being uploaded (0 for initial state)
 }
 
 export type OnProgress = (progress: UploadProgress) => void;
 
-const PART_SIZE = 10 * 1024 * 1024; // 10MB per part
+/** Part size for multipart uploads — 10MB (S3 minimum is 5MB) */
+const PART_SIZE = 10 * 1024 * 1024;
+
+/** Maximum concurrent part uploads — balances speed vs. browser connection limits */
 const CONCURRENT_UPLOADS = 3;
 
+/**
+ * Upload a recorded audio blob to S3.
+ *
+ * Automatically chooses simple or multipart upload based on file size.
+ * Multipart upload falls back to simple on failure.
+ *
+ * @param blob — WAV audio blob from recorderService
+ * @param roomId — Meeting room ID
+ * @param participantName — User identifier (persistent userId)
+ * @param sessionId — Recording session ID from server
+ * @param onProgress — Callback for upload progress updates
+ */
 export async function uploadFile(
   blob: Blob,
   roomId: string,
@@ -27,12 +107,12 @@ export async function uploadFile(
   sessionId: string | undefined,
   onProgress?: OnProgress,
 ): Promise<void> {
-  // For small files (< 10MB), use simple upload
+  // Simple upload for small files
   if (blob.size <= PART_SIZE) {
     return simpleUpload(blob, roomId, participantName, sessionId, onProgress);
   }
 
-  // For larger files, try multipart upload with fallback to simple
+  // Multipart upload for large files, with simple upload fallback
   try {
     return await multipartUpload(blob, roomId, participantName, sessionId, onProgress);
   } catch (err) {
@@ -41,6 +121,10 @@ export async function uploadFile(
   }
 }
 
+/**
+ * Simple single-request upload via presigned S3 PUT URL.
+ * Used for files ≤10MB or as fallback when multipart fails.
+ */
 async function simpleUpload(
   blob: Blob,
   roomId: string,
@@ -48,7 +132,7 @@ async function simpleUpload(
   sessionId: string | undefined,
   onProgress?: OnProgress,
 ): Promise<void> {
-  // Get presigned URL
+  // Step 1: Get presigned PUT URL from server
   const res = await fetch(`${API_BASE}/upload/url`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -56,10 +140,10 @@ async function simpleUpload(
   });
   const { uploadUrl, key } = await res.json();
 
-  // Upload to S3
+  // Step 2: Upload directly to S3
   await uploadWithProgress(uploadUrl, blob, 1, blob.size, onProgress);
 
-  // Notify server of completion
+  // Step 3: Notify server of completion — creates Recording entry + triggers processing
   await fetch(`${API_BASE}/upload/complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -67,6 +151,10 @@ async function simpleUpload(
   });
 }
 
+/**
+ * Multipart upload for large files (>10MB).
+ * Splits the blob into 10MB parts, uploads 3 concurrently, with resume support.
+ */
 async function multipartUpload(
   blob: Blob,
   roomId: string,
@@ -81,10 +169,11 @@ async function multipartUpload(
   let completedParts: Array<{ PartNumber: number; ETag: string }> = [];
   const skipPartNumbers = new Set<number>();
 
-  // Check for resumable upload state
+  // ── Check for resumable upload state in IndexedDB ────────────────
   const savedState = await getUploadState(stateKey);
   if (savedState && savedState.blobSize === blob.size) {
     try {
+      // Verify with server that the upload is still valid
       const serverParts = await fetchUploadedParts(savedState.key, savedState.uploadId);
       uploadId = savedState.uploadId;
       key = savedState.key;
@@ -94,6 +183,7 @@ async function multipartUpload(
       }));
       for (const p of completedParts) skipPartNumbers.add(p.PartNumber);
 
+      // Report resumed progress
       onProgress?.({
         loaded: serverParts.totalUploaded,
         total: blob.size,
@@ -101,12 +191,12 @@ async function multipartUpload(
         partNumber: 0,
       });
     } catch {
-      // Saved state is stale; start fresh
+      // Saved state is stale (upload expired or aborted); start fresh
       await clearUploadState(stateKey);
     }
   }
 
-  // If no resumable state, initiate a new multipart upload
+  // ── Initiate new multipart upload if needed ─────────────────────
   if (skipPartNumbers.size === 0) {
     const initRes = await fetch(`${API_BASE}/multipart-upload/initiate`, {
       method: 'POST',
@@ -135,9 +225,11 @@ async function multipartUpload(
     createdAt: Date.now(),
   });
 
-  // Upload Part 1 (special: also goes to temp location for WAV header patching)
+  // ── Upload Part 1 (special: also goes to temp for WAV header patching) ──
   if (!skipPartNumbers.has(1)) {
     const part1Blob = blob.slice(0, PART_SIZE);
+
+    // Get temp presigned URL for Part 1
     const part1Res = await fetch(`${API_BASE}/multipart-upload/part-1`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -145,7 +237,7 @@ async function multipartUpload(
     });
     const { url: part1Url } = await part1Res.json();
 
-    // Upload Part 1 to temp
+    // Upload Part 1 to temp location (for WAV header extraction later)
     await uploadWithProgress(part1Url, part1Blob, 1, blob.size, onProgress);
 
     // Also upload Part 1 to the actual multipart upload
@@ -158,7 +250,7 @@ async function multipartUpload(
     const etag1 = await uploadPartAndGetEtag(actualPart1Url, part1Blob);
     completedParts.push({ PartNumber: 1, ETag: etag1 });
 
-    // Update saved state
+    // Persist progress after Part 1
     await saveUploadState({
       sessionKey: stateKey,
       uploadId: uploadId!,
@@ -173,18 +265,19 @@ async function multipartUpload(
     });
   }
 
-  // Upload remaining parts concurrently
+  // ── Upload remaining parts concurrently (3 at a time) ─────────────
   const partTasks: Array<() => Promise<{ PartNumber: number; ETag: string }>> = [];
 
   for (let partNumber = 2; partNumber <= totalParts; partNumber++) {
     if (skipPartNumbers.has(partNumber)) continue;
 
-    const pn = partNumber;
+    const pn = partNumber; // Capture for closure
     partTasks.push(async () => {
       const start = (pn - 1) * PART_SIZE;
       const end = Math.min(start + PART_SIZE, blob.size);
       const partBlob = blob.slice(start, end);
 
+      // Get presigned URL for this part
       const partRes = await fetch(`${API_BASE}/multipart-upload/part-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,8 +285,10 @@ async function multipartUpload(
       });
       const { url: partUrl } = await partRes.json();
 
+      // Upload part directly to S3
       const etag = await uploadPartAndGetEtag(partUrl, partBlob);
 
+      // Report progress
       onProgress?.({
         loaded: end,
         total: blob.size,
@@ -207,7 +302,7 @@ async function multipartUpload(
 
   const remainingParts = await runWithConcurrency(partTasks, CONCURRENT_UPLOADS);
 
-  // Update completed parts with results and persist
+  // Merge results and persist final state
   completedParts.push(...remainingParts);
   await saveUploadState({
     sessionKey: stateKey,
@@ -222,22 +317,27 @@ async function multipartUpload(
     createdAt: Date.now(),
   });
 
-  // Sort parts by number for completion
+  // Sort parts by number — S3 requires ordered completion
   completedParts.sort((a, b) => a.PartNumber - b.PartNumber);
 
-  // Complete the multipart upload
+  // ── Complete the multipart upload ─────────────────────────────────
+  // Server patches WAV header, assembles parts, creates Recording entry
   await fetch(`${API_BASE}/multipart-upload/complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ key: key!, uploadId: uploadId!, parts: completedParts, roomId, participantName, sessionId }),
   });
 
-  // Clear saved upload state on success
+  // Clear saved state on success
   await clearUploadState(stateKey);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
+/**
+ * Fetch the list of already-uploaded parts from the server.
+ * Used for resume: compare server state with local state.
+ */
 async function fetchUploadedParts(
   key: string,
   uploadId: string,
@@ -249,6 +349,14 @@ async function fetchUploadedParts(
   return res.json();
 }
 
+/**
+ * Run async tasks with bounded concurrency.
+ * Spawns N workers that each pull from the task queue until empty.
+ *
+ * @param tasks — Array of async factory functions
+ * @param concurrency — Max simultaneous tasks
+ * @returns Results in the same order as input tasks
+ */
 async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
   concurrency: number,
@@ -271,6 +379,10 @@ async function runWithConcurrency<T>(
   return results;
 }
 
+/**
+ * Upload a blob to a presigned URL and report progress.
+ * Used for simple uploads and Part 1 temp upload.
+ */
 async function uploadWithProgress(
   url: string,
   blob: Blob,
@@ -292,6 +404,10 @@ async function uploadWithProgress(
   });
 }
 
+/**
+ * Upload a part to a presigned URL and extract the ETag from the response.
+ * The ETag is required for the S3 CompleteMultipartUpload call.
+ */
 async function uploadPartAndGetEtag(url: string, blob: Blob): Promise<string> {
   const response = await fetch(url, {
     method: 'PUT',
