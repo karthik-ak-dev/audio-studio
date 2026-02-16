@@ -34,7 +34,7 @@ declare global {
  */
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   // Skip auth in development if no JWT_SECRET configured
-  if (process.env.ENV === 'development' && !process.env.JWT_SECRET) {
+  if (process.env.ENV === 'development') {
     return next();
   }
 
