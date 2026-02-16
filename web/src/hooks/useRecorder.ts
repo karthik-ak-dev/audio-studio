@@ -1,11 +1,16 @@
 import { useState, useCallback, useRef } from 'react';
-import { startRecording as startRec, stopRecording as stopRec } from '@/services/recorderService';
+import {
+  startRecording as startRec,
+  stopRecording as stopRec,
+  recoverRecording,
+} from '@/services/recorderService';
 
 export interface UseRecorderReturn {
   isRecording: boolean;
   recordingDuration: number;
-  start: (stream: MediaStream) => Promise<void>;
+  start: (stream: MediaStream, sessionKey?: string) => Promise<void>;
   stop: () => Blob | null;
+  recover: (sessionKey: string) => Promise<Blob | null>;
 }
 
 export function useRecorder(): UseRecorderReturn {
@@ -14,8 +19,8 @@ export function useRecorder(): UseRecorderReturn {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
 
-  const start = useCallback(async (stream: MediaStream) => {
-    await startRec(stream);
+  const start = useCallback(async (stream: MediaStream, sessionKey?: string) => {
+    await startRec(stream, sessionKey);
     setIsRecording(true);
     startTimeRef.current = Date.now();
 
@@ -36,5 +41,9 @@ export function useRecorder(): UseRecorderReturn {
     return blob;
   }, []);
 
-  return { isRecording, recordingDuration, start, stop };
+  const recover = useCallback(async (sessionKey: string): Promise<Blob | null> => {
+    return recoverRecording(sessionKey);
+  }, []);
+
+  return { isRecording, recordingDuration, start, stop, recover };
 }

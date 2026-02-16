@@ -1,10 +1,42 @@
 import type { Socket } from 'socket.io-client';
 import { SOCKET_EVENTS } from '../shared';
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
+function getIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
+
+  const turnUrl = import.meta.env.VITE_TURN_URL;
+  const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+  if (turnUrl && turnUsername && turnCredential) {
+    servers.push({
+      urls: turnUrl,
+      username: turnUsername,
+      credential: turnCredential,
+    });
+  }
+
+  return servers;
+}
+
+// ICE candidate queue — buffers candidates until remote description is set
+const candidateQueues = new Map<RTCPeerConnection, RTCIceCandidateInit[]>();
+
+async function flushCandidateQueue(pc: RTCPeerConnection): Promise<void> {
+  const queue = candidateQueues.get(pc);
+  if (!queue) return;
+  while (queue.length > 0) {
+    const candidate = queue.shift()!;
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.warn('Failed to add queued ICE candidate:', err);
+    }
+  }
+}
 
 export interface WebRTCCallbacks {
   onRemoteStream: (stream: MediaStream) => void;
@@ -17,7 +49,10 @@ export function createPeerConnection(
   localStream: MediaStream,
   callbacks: WebRTCCallbacks,
 ): RTCPeerConnection {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+
+  // Initialize candidate queue for this connection
+  candidateQueues.set(pc, []);
 
   // Add local tracks
   localStream.getTracks().forEach((track) => {
@@ -69,6 +104,7 @@ export async function handleOffer(
   senderSocketId: string,
 ): Promise<void> {
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  await flushCandidateQueue(pc);
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   socket.emit(SOCKET_EVENTS.ANSWER, {
@@ -82,11 +118,27 @@ export async function handleAnswer(
   sdp: RTCSessionDescriptionInit,
 ): Promise<void> {
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  await flushCandidateQueue(pc);
 }
 
 export async function handleIceCandidate(
   pc: RTCPeerConnection,
   candidate: RTCIceCandidateInit,
 ): Promise<void> {
-  await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  if (!pc.remoteDescription) {
+    const queue = candidateQueues.get(pc);
+    if (queue) {
+      queue.push(candidate);
+    }
+    return;
+  }
+  try {
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (err) {
+    console.warn('Failed to add ICE candidate:', err);
+  }
+}
+
+export function cleanupPeerConnection(pc: RTCPeerConnection): void {
+  candidateQueues.delete(pc);
 }

@@ -1,6 +1,8 @@
 // Records local microphone audio to WAV (48kHz 16-bit PCM)
 // Separate from WebRTC — this captures lossless audio for the dataset
 
+import { storeChunk, getChunks, clearChunks } from './storageService';
+
 export interface RecorderState {
   isRecording: boolean;
   startedAt: number | null;
@@ -11,6 +13,8 @@ export interface RecorderState {
 let audioContext: AudioContext | null = null;
 let mediaStreamSource: MediaStreamAudioSourceNode | null = null;
 let workletNode: AudioWorkletNode | null = null;
+let currentSessionKey: string | null = null;
+let chunkIndex = 0;
 let state: RecorderState = {
   isRecording: false,
   startedAt: null,
@@ -18,12 +22,23 @@ let state: RecorderState = {
   sampleRate: 48000,
 };
 
-export async function startRecording(stream: MediaStream): Promise<void> {
+export async function startRecording(stream: MediaStream, sessionKey?: string): Promise<void> {
+  currentSessionKey = sessionKey || `recording:${Date.now()}`;
+  chunkIndex = 0;
+
   audioContext = new AudioContext({ sampleRate: 48000 });
   state.sampleRate = audioContext.sampleRate;
 
   // Use ScriptProcessor as fallback if AudioWorklet isn't available
   mediaStreamSource = audioContext.createMediaStreamSource(stream);
+
+  const onChunk = (chunk: Float32Array) => {
+    state.chunks.push(chunk);
+    // Fire-and-forget IndexedDB write (non-blocking)
+    storeChunk(currentSessionKey!, chunkIndex++, chunk).catch((err) =>
+      console.warn('Failed to persist chunk to IndexedDB:', err),
+    );
+  };
 
   try {
     await audioContext.audioWorklet.addModule('/audio-recorder-worklet.js');
@@ -31,7 +46,7 @@ export async function startRecording(stream: MediaStream): Promise<void> {
 
     workletNode.port.onmessage = (event) => {
       if (event.data.type === 'audio-data') {
-        state.chunks.push(new Float32Array(event.data.buffer));
+        onChunk(new Float32Array(event.data.buffer));
       }
     };
 
@@ -43,7 +58,7 @@ export async function startRecording(stream: MediaStream): Promise<void> {
     processor.onaudioprocess = (event) => {
       if (state.isRecording) {
         const inputData = event.inputBuffer.getChannelData(0);
-        state.chunks.push(new Float32Array(inputData));
+        onChunk(new Float32Array(inputData));
       }
     };
     mediaStreamSource.connect(processor);
@@ -76,7 +91,22 @@ export function stopRecording(): Blob | null {
   const wavBlob = encodeWAV(state.chunks, state.sampleRate);
   state.chunks = [];
   state.startedAt = null;
+
+  // Clear persisted chunks after successful encoding
+  if (currentSessionKey) {
+    clearChunks(currentSessionKey).catch(() => {});
+    currentSessionKey = null;
+  }
+
   return wavBlob;
+}
+
+export async function recoverRecording(sessionKey: string): Promise<Blob | null> {
+  const chunks = await getChunks(sessionKey);
+  if (chunks.length === 0) return null;
+  const blob = encodeWAV(chunks, 48000);
+  await clearChunks(sessionKey);
+  return blob;
 }
 
 export function getRecorderState(): RecorderState {

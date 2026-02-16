@@ -12,6 +12,8 @@ import UploadProgress from '@/components/UploadProgress';
 import ChatPanel from '@/components/ChatPanel';
 import { useAudioMetrics } from '@/hooks/useAudioMetrics';
 import { SOCKET_EVENTS } from '../shared';
+import { getPendingRecordings, clearChunks } from '@/services/storageService';
+import type { PendingRecording } from '@/services/storageService';
 
 export default function Studio() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -21,6 +23,7 @@ export default function Studio() {
   const [qualityUpdate, setQualityUpdate] = useState<QualityUpdatePayload | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [pendingRecovery, setPendingRecovery] = useState<PendingRecording[]>([]);
   const localAudioRef = useRef<HTMLAudioElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
@@ -30,10 +33,32 @@ export default function Studio() {
     localStorage.setItem('userId', userId.current);
   }, []);
 
+  // Check for recoverable recordings on mount
+  useEffect(() => {
+    getPendingRecordings().then((pending) => {
+      if (pending.length > 0) {
+        setPendingRecovery(pending);
+      }
+    }).catch(() => {});
+  }, []);
+
   const { metrics, startMetrics, stopMetrics } = useAudioMetrics();
   const recorder = useRecorder();
   const upload = useUpload();
   const webrtc = useWebRTC();
+
+  const handleRecover = useCallback(async (sessionKey: string) => {
+    const blob = await recorder.recover(sessionKey);
+    if (blob && roomId) {
+      await upload.upload(blob, roomId, userId.current, sessionId || undefined);
+    }
+    setPendingRecovery((prev) => prev.filter((p) => p.sessionKey !== sessionKey));
+  }, [roomId, sessionId, upload, recorder]);
+
+  const handleDismissRecovery = useCallback(async (sessionKey: string) => {
+    await clearChunks(sessionKey);
+    setPendingRecovery((prev) => prev.filter((p) => p.sessionKey !== sessionKey));
+  }, []);
 
   const {
     socket,
@@ -69,7 +94,8 @@ export default function Studio() {
         setSessionId(data.sessionId);
         setWarnings([]);
         if (localStream) {
-          await recorder.start(localStream);
+          const key = `${roomId}:${userId.current}:${data.sessionId}`;
+          await recorder.start(localStream, key);
         }
       },
       onStopRecording: async () => {
@@ -82,7 +108,8 @@ export default function Studio() {
       onResumeRecording: async (data) => {
         setSessionId(data.sessionId);
         if (localStream && !recorder.isRecording) {
-          await recorder.start(localStream);
+          const key = `${roomId}:${userId.current}:${data.sessionId}`;
+          await recorder.start(localStream, key);
         }
       },
       onRecordingWarning: (data) => {
@@ -193,6 +220,29 @@ export default function Studio() {
       {error && (
         <div className="bg-red-900/50 border-b border-red-500 px-6 py-2 text-red-200 text-sm">
           {error}
+        </div>
+      )}
+
+      {pendingRecovery.length > 0 && (
+        <div className="bg-yellow-900/50 border-b border-yellow-600 px-6 py-3 text-yellow-200 text-sm">
+          <p className="font-medium mb-2">Unsaved recording found from a previous session</p>
+          {pendingRecovery.map((p) => (
+            <div key={p.sessionKey} className="flex items-center gap-3">
+              <span>{p.chunkCount} chunks recorded</span>
+              <button
+                onClick={() => handleRecover(p.sessionKey)}
+                className="underline hover:text-yellow-100"
+              >
+                Recover & Upload
+              </button>
+              <button
+                onClick={() => handleDismissRecovery(p.sessionKey)}
+                className="underline hover:text-yellow-100 text-yellow-400"
+              >
+                Discard
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

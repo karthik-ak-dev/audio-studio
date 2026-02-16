@@ -6,6 +6,7 @@ import {
   handleOffer,
   handleAnswer,
   handleIceCandidate,
+  cleanupPeerConnection,
 } from '@/services/webrtcService';
 
 export interface UseWebRTCReturn {
@@ -25,8 +26,11 @@ export function useWebRTC(): UseWebRTCReturn {
 
   const initConnection = useCallback(
     (socket: Socket, targetSocketId: string, localStream: MediaStream) => {
-      // Close any existing connection
-      pcRef.current?.close();
+      // Clean up any existing connection
+      if (pcRef.current) {
+        cleanupPeerConnection(pcRef.current);
+        pcRef.current.close();
+      }
 
       const pc = createPeerConnection(socket, targetSocketId, localStream, {
         onRemoteStream: setRemoteStream,
@@ -47,8 +51,11 @@ export function useWebRTC(): UseWebRTCReturn {
       senderSocketId: string,
       localStream: MediaStream,
     ) => {
-      // Close any existing connection
-      pcRef.current?.close();
+      // Clean up any existing connection
+      if (pcRef.current) {
+        cleanupPeerConnection(pcRef.current);
+        pcRef.current.close();
+      }
 
       const pc = createPeerConnection(socket, senderSocketId, localStream, {
         onRemoteStream: setRemoteStream,
@@ -74,7 +81,10 @@ export function useWebRTC(): UseWebRTCReturn {
   }, []);
 
   const closeConnection = useCallback(() => {
-    pcRef.current?.close();
+    if (pcRef.current) {
+      cleanupPeerConnection(pcRef.current);
+      pcRef.current.close();
+    }
     pcRef.current = null;
     setRemoteStream(null);
     setConnectionState(null);
