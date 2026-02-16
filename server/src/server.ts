@@ -28,6 +28,7 @@
  *   - uncaughtException: logs and exits (unrecoverable state)
  *   - bootstrap failure: logs and exits with code 1
  */
+import './env';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';

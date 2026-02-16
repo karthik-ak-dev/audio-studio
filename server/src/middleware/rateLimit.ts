@@ -43,6 +43,7 @@ export const multipartLimiter = rateLimit({
     const uploadId = req.body?.uploadId || req.query?.uploadId || '';
     return `${req.ip}-${uploadId}`;
   },
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false },
   handler: (_req, res, _next, options) => {
     logger.warn('Multipart rate limit exceeded', { ip: _req.ip, uploadId: _req.body?.uploadId });
     res.status(429).json(options.message);
