@@ -35,23 +35,23 @@ export default function VolumeIndicator({ rmsDb, peakDb, isClipping, hideLabels 
   const hotZone = 90;
 
   const getBarGradient = () => {
-    if (isClipping) return 'bg-red-500';
-    if (level > hotZone) return 'bg-gradient-to-r from-green-500 via-yellow-400 to-red-400';
-    if (level > quietZone) return 'bg-gradient-to-r from-green-600 to-green-400';
-    return 'bg-gray-500';
+    if (isClipping) return 'bg-danger';
+    if (level > hotZone) return 'bg-gradient-to-r from-success via-warning to-danger';
+    if (level > quietZone) return 'bg-gradient-to-r from-success-dark to-success';
+    return 'bg-surface-500';
   };
 
   return (
     <div className="space-y-1.5">
       {/* Meter track */}
-      <div className="relative w-full h-4 overflow-hidden border rounded-md bg-gray-800/80 border-gray-700/50">
+      <div className="relative w-full h-4 overflow-hidden border rounded-md bg-surface-800/80 border-surface-600/50">
         {/* Zone markers: quiet | good | hot */}
         <div
-          className="absolute top-0 z-10 w-px h-full bg-gray-600/40"
+          className="absolute top-0 z-10 w-px h-full bg-surface-600/40"
           style={{ left: `${quietZone}%` }}
         />
         <div
-          className="absolute top-0 z-10 w-px h-full bg-gray-600/40"
+          className="absolute top-0 z-10 w-px h-full bg-surface-600/40"
           style={{ left: `${hotZone}%` }}
         />
 
@@ -63,14 +63,14 @@ export default function VolumeIndicator({ rmsDb, peakDb, isClipping, hideLabels 
 
         {/* Peak hold line */}
         <div
-          className="absolute top-0 h-full w-0.5 bg-white/70 rounded-full z-10"
+          className="absolute top-0 h-full w-0.5 bg-surface-50/70 rounded-full z-10"
           style={{ left: `${peakLevel}%` }}
         />
       </div>
 
       {/* Scale labels — hidden in GreenRoom for clean UX, shown in Studio */}
       {!hideLabels && (
-        <div className="flex justify-between text-[10px] text-gray-600 px-0.5">
+        <div className="flex justify-between text-[10px] text-surface-500 px-0.5">
           <span>-60</span>
           <span style={{ position: 'absolute', left: `${quietZone}%`, transform: 'translateX(-50%)' }} className="relative">-40</span>
           <span style={{ position: 'absolute', left: `${hotZone}%`, transform: 'translateX(-50%)' }} className="relative">-6</span>

@@ -21,6 +21,7 @@
 
 import type { Meeting, Participant, RecordingState } from './meeting';
 import type { QualityProfile } from '../constants/thresholds';
+import type { SpectralWarning } from './metrics';
 
 // ═══════════════════════════════════════════════════════════════════
 // 1. WebRTC Signaling Payloads
@@ -104,6 +105,18 @@ export interface MicCheckPayload {
   peak: number;                   // Peak amplitude (dBFS)
   noiseFloor: number;             // Background noise level (dBFS, lower = quieter)
   isClipping: boolean;            // Whether the audio signal is clipping (distortion)
+
+  // ── Spectral analysis ───────────────────────────────────────
+  voiceBandEnergy: number;        // Fraction of energy in 300Hz–3.4kHz (0–1)
+  highFreqEnergy: number;         // Fraction of energy above 2kHz (0–1)
+  spectralFlatness: number;       // Wiener entropy (0=tonal, 1=flat/noise)
+  humDetected: boolean;           // Concentrated energy at 50/60Hz
+
+  // ── Consistency ─────────────────────────────────────────────
+  rmsStability: number;           // Stddev of RMS over rolling window (dB)
+
+  // ── Speech detection ────────────────────────────────────────
+  speechLikely: boolean;          // Speech-like spectral profile detected
 }
 
 /**
@@ -217,6 +230,13 @@ export interface MicStatusPayload {
   noiseFloor: 'clean' | 'noisy' | 'unacceptable'; // Background noise classification
   clipping: boolean;              // Whether audio is clipping
   suggestions: string[];          // Human-readable improvement suggestions
+
+  // ── Enhanced checks ─────────────────────────────────────────
+  snr: 'good' | 'fair' | 'poor' | 'blocking';
+  snrValue: number;               // Computed SNR in dB
+  speechVerified: boolean;        // Speech spectrally verified
+  stability: 'stable' | 'unstable';
+  spectralWarnings: SpectralWarning[];
 }
 
 /**

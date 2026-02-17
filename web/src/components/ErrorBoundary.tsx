@@ -63,15 +63,15 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div className="flex items-center justify-center min-h-screen p-4 bg-gray-950">
+        <div className="flex items-center justify-center min-h-screen p-4 bg-surface-950">
           <div className="max-w-md space-y-4 text-center">
-            <h1 className="text-2xl font-bold text-white">Something went wrong</h1>
-            <p className="text-gray-400">
+            <h1 className="text-2xl font-bold text-surface-50">Something went wrong</h1>
+            <p className="text-surface-400">
               {this.state.error?.message || 'An unexpected error occurred.'}
             </p>
             <button
               onClick={this.handleRefresh}
-              className="px-6 py-3 font-medium text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700"
+              className="px-6 py-3 font-semibold transition-colors bg-accent-400 rounded-lg hover:bg-accent-500 text-surface-950"
             >
               Refresh Page
             </button>

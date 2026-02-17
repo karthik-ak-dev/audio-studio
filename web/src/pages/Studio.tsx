@@ -407,44 +407,44 @@ export default function Studio() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* ── Header bar ─────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800">
+      <header className="flex items-center justify-between px-6 py-3 bg-surface-900 border-b border-surface-700">
         <div>
-          <h1 className="text-lg font-semibold text-white">
+          <h1 className="text-lg font-semibold text-surface-50">
             {roomState?.meeting?.title || 'Audio Studio'}
           </h1>
-          <p className="text-xs text-gray-500">Room: {roomId}</p>
+          <p className="text-xs text-surface-500">Room: {roomId}</p>
         </div>
         <div className="flex items-center gap-4">
           {/* Live quality profile badge — shown during recording */}
           {qualityUpdate && <QualityBadge profile={qualityUpdate.estimatedProfile} />}
           {/* Connection indicator: green = connected, red = disconnected */}
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-success' : 'bg-danger'}`} />
         </div>
       </header>
 
       {/* ── Error banner ───────────────────────────────────────────── */}
       {error && (
-        <div className="px-6 py-2 text-sm text-red-200 border-b border-red-500 bg-red-900/50">
+        <div className="px-6 py-2 text-sm text-danger-light border-b border-danger bg-danger-dark/50">
           {error}
         </div>
       )}
 
       {/* ── Crash recovery banner ──────────────────────────────────── */}
       {pendingRecovery.length > 0 && (
-        <div className="px-6 py-3 text-sm text-yellow-200 border-b border-yellow-600 bg-yellow-900/50">
+        <div className="px-6 py-3 text-sm text-warning-light border-b border-warning bg-warning-dark/50">
           <p className="mb-2 font-medium">Unsaved recording found from a previous session</p>
           {pendingRecovery.map((p) => (
             <div key={p.sessionKey} className="flex items-center gap-3">
               <span>{p.chunkCount} chunks recorded</span>
               <button
                 onClick={() => handleRecover(p.sessionKey)}
-                className="underline hover:text-yellow-100"
+                className="underline hover:text-warning-light"
               >
                 Recover & Upload
               </button>
               <button
                 onClick={() => handleDismissRecovery(p.sessionKey)}
-                className="text-yellow-400 underline hover:text-yellow-100"
+                className="text-warning underline hover:text-warning-light"
               >
                 Discard
               </button>
@@ -460,14 +460,14 @@ export default function Studio() {
           {/* ── Participant cards ─────────────────────────────────── */}
           <div className="flex gap-4">
             {participants.map((p) => (
-              <div key={p.socketId} className="flex-1 px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg">
-                <div className="mb-1 text-sm text-gray-400">{p.role}</div>
-                <div className="font-medium text-white">{p.userEmail || p.userId}</div>
+              <div key={p.socketId} className="flex-1 px-4 py-3 bg-surface-900 border border-surface-700 rounded-lg">
+                <div className="mb-1 text-sm text-surface-400">{p.role}</div>
+                <div className="font-medium text-surface-50">{p.userEmail || p.userId}</div>
               </div>
             ))}
             {/* Placeholder shown when waiting for the second participant */}
             {participants.length < 2 && (
-              <div className="flex items-center justify-center flex-1 px-4 py-3 text-sm text-gray-600 bg-gray-900 border border-gray-800 border-dashed rounded-lg">
+              <div className="flex items-center justify-center flex-1 px-4 py-3 text-sm text-surface-500 bg-surface-900 border border-surface-700 border-dashed rounded-lg">
                 Waiting for partner...
               </div>
             )}
@@ -476,7 +476,7 @@ export default function Studio() {
           {/* ── Local audio level meter ──────────────────────────── */}
           {metrics && (
             <div>
-              <label className="block mb-2 text-sm text-gray-400">Your Audio Level</label>
+              <label className="block mb-2 text-sm text-surface-400">Your Audio Level</label>
               <VolumeIndicator
                 rmsDb={metrics.smoothRms}
                 peakDb={metrics.smoothPeak}
@@ -491,14 +491,14 @@ export default function Studio() {
               <>
                 <button
                   onClick={emitStopRecording}
-                  className="px-6 py-3 font-medium text-white transition-colors bg-red-600 rounded-lg hover:bg-red-700"
+                  className="px-6 py-3 font-medium text-surface-50 transition-colors bg-danger rounded-lg hover:bg-danger-light"
                 >
                   Stop Recording
                 </button>
                 {/* Pulsing red dot + duration timer */}
                 <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-                  <span className="font-mono text-lg text-white">
+                  <div className="w-3 h-3 bg-danger rounded-full animate-pulse" />
+                  <span className="font-mono text-lg text-surface-50">
                     {formatDuration(recorder.recordingDuration)}
                   </span>
                 </div>
@@ -507,7 +507,7 @@ export default function Studio() {
               <button
                 onClick={emitStartRecording}
                 disabled={!peerConnected}
-                className="px-6 py-3 font-medium text-white transition-colors rounded-lg bg-studio-600 hover:bg-studio-700 disabled:opacity-50"
+                className="px-6 py-3 font-semibold transition-colors rounded-lg bg-accent-400 hover:bg-accent-500 text-surface-950 disabled:opacity-50"
               >
                 {peerConnected ? 'Start Recording' : 'Waiting for partner...'}
               </button>
@@ -528,7 +528,7 @@ export default function Studio() {
           {!upload.isUploading && upload.progress && upload.progress.percent === 100 && (
             <button
               onClick={() => navigate(`/room/${roomId}/results`)}
-              className="w-full py-3 font-medium text-white transition-colors rounded-lg bg-studio-600 hover:bg-studio-700"
+              className="w-full py-3 font-semibold transition-colors rounded-lg bg-accent-400 hover:bg-accent-500 text-surface-950"
             >
               View Results
             </button>
@@ -536,7 +536,7 @@ export default function Studio() {
         </div>
 
         {/* Right panel — chat sidebar */}
-        <div className="p-4 border-l border-gray-800 w-80">
+        <div className="p-4 border-l border-surface-700 w-80">
           <ChatPanel
             messages={chatMessages}
             onSend={sendChat}

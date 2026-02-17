@@ -43,7 +43,22 @@ export interface MicCheckMetrics {
   peak: number;                 // Peak sample level (dBFS)
   noiseFloor: number;           // Estimated background noise (dBFS)
   isClipping: boolean;          // True if any sample reached ±1.0
+
+  // ── Spectral analysis (computed client-side) ────────────────
+  voiceBandEnergy: number;      // Fraction of energy in 300Hz–3.4kHz (0–1)
+  highFreqEnergy: number;       // Fraction of energy above 2kHz (0–1)
+  spectralFlatness: number;     // Wiener entropy (0=tonal/speech, 1=flat/noise)
+  humDetected: boolean;         // Concentrated energy at 50Hz or 60Hz
+
+  // ── Consistency ─────────────────────────────────────────────
+  rmsStability: number;         // Stddev of RMS over rolling window (dB)
+
+  // ── Improved speech detection ───────────────────────────────
+  speechLikely: boolean;        // Speech-like spectral profile detected
 }
+
+/** Spectral warning types detected during green room mic check */
+export type SpectralWarning = 'muffled' | 'hum-detected' | 'noise-like';
 
 /**
  * Server's assessment of mic quality — response to mic-check event.
@@ -54,6 +69,13 @@ export interface MicStatus {
   noiseFloor: 'clean' | 'noisy' | 'unacceptable';
   clipping: boolean;
   suggestions: string[];        // e.g., ["Move mic closer", "Reduce gain"]
+
+  // ── Enhanced checks ─────────────────────────────────────────
+  snr: 'good' | 'fair' | 'poor' | 'blocking';
+  snrValue: number;             // Computed SNR in dB (for display)
+  speechVerified: boolean;      // Speech spectrally verified (not just RMS)
+  stability: 'stable' | 'unstable';
+  spectralWarnings: SpectralWarning[];
 }
 
 /**

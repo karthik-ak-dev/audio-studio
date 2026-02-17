@@ -31,9 +31,11 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { computeMetrics, resetMetrics } from '@/services/metricsService';
+import { computeSpectralMetrics } from '@/services/spectralService';
 import type { AudioMetrics } from '@/services/metricsService';
+import type { SpectralMetrics } from '@/services/spectralService';
 
-export interface SmoothedAudioMetrics extends AudioMetrics {
+export interface SmoothedAudioMetrics extends AudioMetrics, SpectralMetrics {
   /** EMA-smoothed RMS in dBFS — use this for visual display */
   smoothRms: number;
   /** Slow-decaying peak in dBFS — use this for peak hold indicator */
@@ -86,11 +88,16 @@ export function useAudioMetrics(): UseAudioMetricsReturn {
     resetMetrics(); // Clear silence/speech tracking state
 
     const buffer = new Float32Array(analyser.fftSize);
+    const freqBuffer = new Float32Array(analyser.frequencyBinCount);
 
     /** rAF loop — runs at display refresh rate (~60fps) */
     const tick = () => {
       analyser.getFloatTimeDomainData(buffer);
       const raw = computeMetrics(buffer);
+
+      // Frequency-domain analysis for spectral metrics
+      analyser.getFloatFrequencyData(freqBuffer);
+      const spectral = computeSpectralMetrics(freqBuffer, ctx.sampleRate, analyser.fftSize);
 
       // Clamp raw values to usable range for smoothing
       const rawRms = Math.max(-60, raw.rms === -Infinity ? -60 : raw.rms);
@@ -110,6 +117,7 @@ export function useAudioMetrics(): UseAudioMetricsReturn {
 
       setMetrics({
         ...raw,
+        ...spectral,
         smoothRms,
         smoothPeak,
       });

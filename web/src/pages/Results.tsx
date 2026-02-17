@@ -168,12 +168,12 @@ export default function Results() {
         {/* ── Page header with back navigation ────────────────────── */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">Recording Results</h1>
-            <p className="mt-1 text-sm text-gray-400">Room: {roomId}</p>
+            <h1 className="text-2xl font-bold text-surface-50">Recording Results</h1>
+            <p className="mt-1 text-sm text-surface-400">Room: {roomId}</p>
           </div>
           <button
             onClick={() => navigate('/')}
-            className="px-4 py-2 text-sm text-white transition-colors bg-gray-800 rounded-lg hover:bg-gray-700"
+            className="px-4 py-2 text-sm text-surface-50 transition-colors bg-surface-800 rounded-lg hover:bg-surface-700"
           >
             Back to Home
           </button>
@@ -181,12 +181,12 @@ export default function Results() {
 
         {/* ── Processing progress (while pipeline is running) ─────── */}
         {processingStatus && (
-          <div className="p-6 space-y-3 bg-gray-900 border border-gray-800 rounded-xl">
-            <h2 className="text-lg font-semibold text-white">Processing Audio...</h2>
-            <p className="text-sm text-gray-400">Step: {processingStatus.step}</p>
-            <div className="h-2 overflow-hidden bg-gray-700 rounded-full">
+          <div className="p-6 space-y-3 bg-surface-900 border border-surface-700 rounded-xl">
+            <h2 className="text-lg font-semibold text-surface-50">Processing Audio...</h2>
+            <p className="text-sm text-surface-400">Step: {processingStatus.step}</p>
+            <div className="h-2 overflow-hidden bg-surface-700 rounded-full">
               <div
-                className="h-full transition-all duration-300 rounded-full bg-studio-500"
+                className="h-full transition-all duration-300 rounded-full bg-accent-400"
                 style={{ width: `${processingStatus.progress}%` }}
               />
             </div>
@@ -195,16 +195,16 @@ export default function Results() {
 
         {/* ── Quality assessment (after processing completes) ─────── */}
         {processingResult && (
-          <div className="p-6 space-y-4 bg-gray-900 border border-gray-800 rounded-xl">
-            <h2 className="text-lg font-semibold text-white">Quality Assessment</h2>
+          <div className="p-6 space-y-4 bg-surface-900 border border-surface-700 rounded-xl">
+            <h2 className="text-lg font-semibold text-surface-50">Quality Assessment</h2>
             <QualityBadge profile={processingResult.profile} />
 
             {/* Metrics grid — SNR, RMS, SRMR, overlap, speaker balance, echo, WVMOS */}
             <div className="grid grid-cols-2 gap-4 text-sm">
               {Object.entries(processingResult.metrics).map(([key, value]) => (
-                <div key={key} className="px-4 py-3 bg-gray-800 rounded-lg">
-                  <div className="text-gray-400">{key}</div>
-                  <div className="font-mono text-lg text-white">{typeof value === 'number' ? value.toFixed(2) : value}</div>
+                <div key={key} className="px-4 py-3 bg-surface-800 rounded-lg">
+                  <div className="text-surface-400">{key}</div>
+                  <div className="font-mono text-lg text-surface-50">{typeof value === 'number' ? value.toFixed(2) : value}</div>
                 </div>
               ))}
             </div>
@@ -212,9 +212,9 @@ export default function Results() {
             {/* Processing warnings/notes */}
             {processingResult.warnings.length > 0 && (
               <div className="space-y-1">
-                <h3 className="text-sm font-medium text-gray-400">Notes</h3>
+                <h3 className="text-sm font-medium text-surface-400">Notes</h3>
                 {processingResult.warnings.map((w, i) => (
-                  <p key={i} className="text-sm text-yellow-300">{w}</p>
+                  <p key={i} className="text-sm text-warning">{w}</p>
                 ))}
               </div>
             )}
@@ -223,11 +223,11 @@ export default function Results() {
 
         {/* ── Rejection notice (if recording quality too low) ─────── */}
         {rejection && (
-          <div className="p-6 space-y-3 bg-red-900/30 border border-red-700 rounded-xl">
-            <h2 className="text-lg font-semibold text-red-200">Recording Rejected</h2>
-            <p className="text-sm text-red-300">{rejection.reason}</p>
+          <div className="p-6 space-y-3 bg-danger-dark/30 border border-danger rounded-xl">
+            <h2 className="text-lg font-semibold text-danger-light">Recording Rejected</h2>
+            <p className="text-sm text-danger-light">{rejection.reason}</p>
             {rejection.suggestions.length > 0 && (
-              <ul className="space-y-1 text-sm text-red-200">
+              <ul className="space-y-1 text-sm text-danger-light">
                 {rejection.suggestions.map((s, i) => (
                   <li key={i}>- {s}</li>
                 ))}
@@ -237,23 +237,23 @@ export default function Results() {
         )}
 
         {/* ── Recordings list with download buttons ──────────────── */}
-        <div className="p-6 space-y-4 bg-gray-900 border border-gray-800 rounded-xl">
-          <h2 className="text-lg font-semibold text-white">Recordings</h2>
+        <div className="p-6 space-y-4 bg-surface-900 border border-surface-700 rounded-xl">
+          <h2 className="text-lg font-semibold text-surface-50">Recordings</h2>
 
           {isLoading ? (
-            <p className="text-sm text-gray-500">Loading recordings...</p>
+            <p className="text-sm text-surface-500">Loading recordings...</p>
           ) : recordings.length === 0 ? (
-            <p className="text-sm text-gray-500">No recordings found for this room.</p>
+            <p className="text-sm text-surface-500">No recordings found for this room.</p>
           ) : (
             <div className="space-y-3">
               {recordings.map((rec) => (
                 <div
                   key={rec.recordingId}
-                  className="flex items-center justify-between px-4 py-3 bg-gray-800 rounded-lg"
+                  className="flex items-center justify-between px-4 py-3 bg-surface-800 rounded-lg"
                 >
                   <div>
-                    <div className="font-medium text-white">{rec.participantName}</div>
-                    <div className="text-sm text-gray-400">
+                    <div className="font-medium text-surface-50">{rec.participantName}</div>
+                    <div className="text-sm text-surface-400">
                       {rec.status} &middot; {new Date(rec.uploadedAt).toLocaleString()}
                     </div>
                   </div>
@@ -261,7 +261,7 @@ export default function Results() {
                   {rec.status === 'completed' && (
                     <button
                       onClick={() => handleDownload(rec)}
-                      className="px-3 py-1.5 bg-studio-600 hover:bg-studio-700 text-white text-sm rounded-lg transition-colors"
+                      className="px-3 py-1.5 bg-accent-400 hover:bg-accent-500 text-surface-950 text-sm font-semibold rounded-lg transition-colors"
                     >
                       Download
                     </button>

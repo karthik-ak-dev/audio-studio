@@ -100,6 +100,7 @@ export type {
 export type {
   MicCheckMetrics,
   MicStatus,
+  SpectralWarning,
   AudioMetricsBatch,
   SpeakerMetricsAggregate,
   RoomMetricsAggregate,

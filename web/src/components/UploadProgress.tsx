@@ -38,7 +38,7 @@ export default function UploadProgress({ progress, isUploading, error }: UploadP
   /* Error state takes priority — show failure message */
   if (error) {
     return (
-      <div className="px-4 py-3 text-sm text-red-200 border border-red-500 rounded-lg bg-red-900/50">
+      <div className="px-4 py-3 text-sm text-danger-light border border-danger rounded-lg bg-danger-dark/50">
         Upload failed: {error}
       </div>
     );
@@ -50,15 +50,15 @@ export default function UploadProgress({ progress, isUploading, error }: UploadP
   const percent = progress?.percent ?? 0;
 
   return (
-    <div className="px-4 py-3 bg-gray-800 rounded-lg">
-      <div className="flex justify-between mb-1 text-sm text-gray-300">
+    <div className="px-4 py-3 bg-surface-800 rounded-lg">
+      <div className="flex justify-between mb-1 text-sm text-surface-200">
         <span>{isUploading ? 'Uploading recording...' : 'Upload complete'}</span>
         <span>{percent}%</span>
       </div>
       {/* Progress bar — width transitions smoothly via CSS */}
-      <div className="h-2 overflow-hidden bg-gray-700 rounded-full">
+      <div className="h-2 overflow-hidden bg-surface-700 rounded-full">
         <div
-          className="h-full transition-all duration-300 rounded-full bg-studio-500"
+          className="h-full transition-all duration-300 rounded-full bg-accent-400"
           style={{ width: `${percent}%` }}
         />
       </div>

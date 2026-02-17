@@ -33,6 +33,13 @@ export function handleGreenRoom(io: SocketIOServer, socket: Socket): void {
         peak: data.peak ?? 0,
         noiseFloor: data.noiseFloor ?? -60,
         isClipping: data.isClipping ?? false,
+        // Spectral analysis (new fields with backward-compatible defaults)
+        voiceBandEnergy: data.voiceBandEnergy ?? 0,
+        highFreqEnergy: data.highFreqEnergy ?? 0,
+        spectralFlatness: data.spectralFlatness ?? 1,
+        humDetected: data.humDetected ?? false,
+        rmsStability: data.rmsStability ?? 0,
+        speechLikely: data.speechLikely ?? false,
       });
 
       // Send result back to the sender (they see their own mic quality indicator)

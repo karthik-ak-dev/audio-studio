@@ -81,6 +81,24 @@ export const AUDIO_THRESHOLDS = {
   TARGET_RMS_MAX: -20,
   /** Target loudness per EBU R128 broadcast standard (LUFS) */
   TARGET_LUFS: -23,
+
+  // ── Green Room Enhanced Checks ──────────────────────────────────
+  /** Minimum SNR to enter recording (dB). Below this → blocked from recording */
+  GREEN_ROOM_SNR_BLOCK: 10,
+  /** SNR below this triggers a warning but allows recording (dB) */
+  GREEN_ROOM_SNR_WARN: 15,
+  /** SNR at or above this is considered good for green room (dB) */
+  GREEN_ROOM_SNR_GOOD: 20,
+  /** Min ratio of energy in 300Hz–3.4kHz voice band to total energy (0–1) */
+  VOICE_BAND_ENERGY_MIN: 0.4,
+  /** Spectral flatness above this suggests noise, not speech (0=tonal, 1=flat) */
+  SPECTRAL_FLATNESS_MAX: 0.7,
+  /** Energy ratio at 50/60Hz vs neighbors — above this = electrical hum */
+  HUM_DETECTION_RATIO: 10,
+  /** Max acceptable stddev of RMS over rolling window (dB). Above = unstable */
+  RMS_STABILITY_MAX_STDDEV: 6,
+  /** Min ratio of energy above 2kHz. Below this = muffled audio */
+  HIGH_FREQ_ENERGY_MIN: 0.05,
 } as const;
 
 /**

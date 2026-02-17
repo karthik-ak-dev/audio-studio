@@ -28,19 +28,19 @@ interface QualityBadgeProps {
 }
 
 /** Color and label mapping for each quality tier */
-const PROFILE_STYLES: Record<QualityProfile, { bg: string; label: string }> = {
-  P0: { bg: 'bg-emerald-500', label: 'Pristine' },
-  P1: { bg: 'bg-green-500', label: 'Good' },
-  P2: { bg: 'bg-yellow-500', label: 'Acceptable' },
-  P3: { bg: 'bg-orange-500', label: 'Poor' },
-  P4: { bg: 'bg-red-500', label: 'Reject' },
+const PROFILE_STYLES: Record<QualityProfile, { bg: string; text: string; label: string }> = {
+  P0: { bg: 'bg-success', text: 'text-surface-950', label: 'Pristine' },
+  P1: { bg: 'bg-success/80', text: 'text-surface-950', label: 'Good' },
+  P2: { bg: 'bg-warning', text: 'text-surface-950', label: 'Acceptable' },
+  P3: { bg: 'bg-[#e67e22]', text: 'text-surface-50', label: 'Poor' },
+  P4: { bg: 'bg-danger', text: 'text-surface-50', label: 'Reject' },
 };
 
 export default function QualityBadge({ profile }: QualityBadgeProps) {
   const style = PROFILE_STYLES[profile];
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium text-white ${style.bg}`}>
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${style.text} ${style.bg}`}>
       <span className="font-bold">{profile}</span>
       <span className="opacity-80">{style.label}</span>
     </span>

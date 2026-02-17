@@ -62,9 +62,9 @@ export default function ChatPanel({ messages, onSend, currentUserId }: ChatPanel
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 border border-gray-800 rounded-lg">
+    <div className="flex flex-col h-full bg-surface-900 border border-surface-700 rounded-lg">
       {/* Panel header */}
-      <div className="px-3 py-2 text-sm font-medium text-gray-400 border-b border-gray-800">
+      <div className="px-3 py-2 text-sm font-medium text-surface-400 border-b border-surface-700">
         Chat
       </div>
 
@@ -76,7 +76,7 @@ export default function ChatPanel({ messages, onSend, currentUserId }: ChatPanel
             <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div
                 className={`max-w-[80%] rounded-lg px-3 py-1.5 text-sm ${
-                  isMe ? 'bg-studio-600 text-white' : 'bg-gray-800 text-gray-200'
+                  isMe ? 'bg-accent-400/20 text-surface-50 border border-accent-400/30' : 'bg-surface-800 text-surface-100'
                 }`}
               >
                 {msg.message}
@@ -89,18 +89,18 @@ export default function ChatPanel({ messages, onSend, currentUserId }: ChatPanel
       </div>
 
       {/* Message input form */}
-      <form onSubmit={handleSubmit} className="px-3 py-2 border-t border-gray-800">
+      <form onSubmit={handleSubmit} className="px-3 py-2 border-t border-surface-700">
         <div className="flex gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type a message..."
-            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-studio-500"
+            className="flex-1 bg-surface-800 border border-surface-600 rounded-lg px-3 py-1.5 text-sm text-surface-50 placeholder-surface-500 focus:outline-none focus:border-accent-400"
           />
           <button
             type="submit"
-            className="px-3 py-1.5 bg-studio-600 text-white rounded-lg text-sm hover:bg-studio-700 transition-colors"
+            className="px-3 py-1.5 bg-accent-400 text-surface-950 rounded-lg text-sm font-semibold hover:bg-accent-500 transition-colors"
           >
             Send
           </button>

@@ -156,6 +156,13 @@ export default function GreenRoom() {
         peak: m.peak,
         noiseFloor: noiseFloorRef.current,
         isClipping: m.clipCount > 0,
+        // Spectral analysis + stability metrics
+        voiceBandEnergy: m.voiceBandEnergy,
+        highFreqEnergy: m.highFreqEnergy,
+        spectralFlatness: m.spectralFlatness,
+        humDetected: m.humDetected,
+        rmsStability: m.rmsStability,
+        speechLikely: m.speechLikely,
       });
     }, 1000);
 
@@ -176,7 +183,7 @@ export default function GreenRoom() {
         data,
       ];
 
-      const good = statusHistoryRef.current.filter((s) => s.level === 'good').length;
+      const good = statusHistoryRef.current.filter((s) => s.level === 'good' && s.speechVerified).length;
       setGoodFrameCount(good);
       setNoiseResult(data.noiseFloor);
     };
@@ -219,14 +226,17 @@ export default function GreenRoom() {
     }
   }, [phase, goodFrameCount]);
 
-  // environment → ready (once noise result arrives)
+  // environment → ready (once noise result arrives + SNR check)
   useEffect(() => {
-    if (phase === 'environment' && noiseResult !== null) {
+    if (phase === 'environment' && noiseResult !== null && latestStatus) {
       const elapsed = Date.now() - phaseEnteredAtRef.current;
       const delay = Math.max(0, MIN_STEP_DISPLAY - elapsed);
 
+      const snrBlocking = latestStatus.snr === 'blocking';
+      const hasBlockingIssue = noiseResult === 'unacceptable' || snrBlocking;
+
       setTimeout(() => {
-        if (noiseResult !== 'unacceptable') {
+        if (!hasBlockingIssue) {
           setCheckState((prev) => ({ ...prev, environment: 'passed' }));
           setPhase('ready');
         } else {
@@ -234,7 +244,7 @@ export default function GreenRoom() {
         }
       }, delay);
     }
-  }, [phase, noiseResult]);
+  }, [phase, noiseResult, latestStatus]);
 
   // ── Navigate to Studio ─────────────────────────────────────
   const handleReady = useCallback(() => {
@@ -269,13 +279,13 @@ export default function GreenRoom() {
       <div className="w-full max-w-xl space-y-6">
         {/* Header */}
         <div className="text-center">
-          <h1 className="mb-1 text-2xl font-bold text-white">Sound Check</h1>
-          <p className="text-sm text-gray-400">
+          <h1 className="mb-1 text-2xl font-bold text-surface-50">Sound Check</h1>
+          <p className="text-sm text-surface-400">
             Let's make sure your microphone is working well
           </p>
         </div>
 
-        <div className="p-6 bg-gray-900 border border-gray-800 rounded-xl">
+        <div className="p-6 bg-surface-900 border border-surface-700 rounded-xl">
           {/* Step 1: Microphone */}
           <StepItem
             stepNumber={1}
@@ -296,17 +306,17 @@ export default function GreenRoom() {
             label="Level Check"
             status={checkState.level}
             statusText={
-              checkState.level === 'passed' ? 'Mic level sounds good' : undefined
+              checkState.level === 'passed' ? 'Mic level and speech verified' : undefined
             }
             isLast={false}
           >
             <div className="space-y-3">
-              <p className="text-sm text-gray-300">
+              <p className="text-sm text-surface-200">
                 {goodFrameCount === 0
-                  ? 'Say something to test your microphone...'
+                  ? 'Say a test phrase to check your microphone...'
                   : goodFrameCount < GOOD_THRESHOLD
-                    ? 'Keep talking for a moment...'
-                    : 'Your mic level is good!'}
+                    ? 'Keep talking — verifying your audio...'
+                    : 'Your mic level and speech quality are good!'}
               </p>
 
               {metrics && (
@@ -324,18 +334,18 @@ export default function GreenRoom() {
                   <div
                     key={i}
                     className={`w-2 h-2 rounded-full transition-colors duration-300 ${
-                      i < goodFrameCount ? 'bg-green-400' : 'bg-gray-700'
+                      i < goodFrameCount ? 'bg-success' : 'bg-surface-700'
                     }`}
                   />
                 ))}
-                <span className="ml-1 text-xs text-gray-600">
+                <span className="ml-1 text-xs text-surface-500">
                   {goodFrameCount}/{GOOD_THRESHOLD}
                 </span>
               </div>
 
               {/* Hint after timeout with no good frames */}
               {showLevelHint && latestStatus && (
-                <div className="px-3 py-2 text-sm border rounded-lg bg-yellow-950/30 border-yellow-800/40 text-yellow-300">
+                <div className="px-3 py-2 text-sm border rounded-lg bg-warning-dark/30 border-warning/40 text-warning">
                   {latestStatus.level === 'too-quiet'
                     ? 'We can barely hear you. Try moving closer to your microphone or increasing the input volume.'
                     : latestStatus.level === 'too-loud'
@@ -355,41 +365,65 @@ export default function GreenRoom() {
               checkState.environment === 'passed'
                 ? noiseResult === 'noisy'
                   ? 'Some background noise -- consider a quieter room'
-                  : 'Your room sounds quiet'
+                  : latestStatus?.snr === 'fair'
+                    ? 'Signal quality is fair -- a quieter room would help'
+                    : 'Your room sounds quiet'
                 : checkState.environment === 'failed'
-                  ? 'Too much background noise'
+                  ? latestStatus?.snr === 'blocking'
+                    ? 'Signal-to-noise ratio too low'
+                    : 'Too much background noise'
                   : undefined
             }
             isLast
           >
             {checkState.environment === 'active' && (
-              <p className="text-sm text-gray-400">Checking background noise...</p>
+              <p className="text-sm text-surface-400">Checking background noise and signal quality...</p>
             )}
             {checkState.environment === 'failed' && (
               <div className="space-y-2">
-                <p className="text-sm text-red-300">
-                  Please move to a quieter space. Background noise will affect
-                  recording quality.
+                <p className="text-sm text-danger-light">
+                  {latestStatus?.snr === 'blocking'
+                    ? 'Signal-to-noise ratio is too low for a quality recording. Reduce background noise or move closer to the microphone.'
+                    : 'Please move to a quieter space. Background noise will affect recording quality.'}
                 </p>
+                {latestStatus?.spectralWarnings.includes('hum-detected') && (
+                  <p className="text-sm text-warning">
+                    Electrical hum detected — try a different USB port or move away from power sources.
+                  </p>
+                )}
                 <button
                   onClick={handleRetryEnvironment}
-                  className="px-3 py-1.5 text-sm text-white rounded-md bg-gray-700 hover:bg-gray-600"
+                  className="px-3 py-1.5 text-sm text-surface-50 rounded-md bg-surface-700 hover:bg-surface-600"
                 >
                   Retry
                 </button>
               </div>
             )}
+            {/* Advisory spectral warnings (shown when passed but with issues) */}
+            {checkState.environment === 'passed' && latestStatus && latestStatus.spectralWarnings.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {latestStatus.spectralWarnings.includes('muffled') && (
+                  <p className="text-xs text-warning">Audio sounds muffled — check that nothing is covering your microphone</p>
+                )}
+                {latestStatus.spectralWarnings.includes('hum-detected') && (
+                  <p className="text-xs text-warning">Electrical hum detected — try a different USB port</p>
+                )}
+                {latestStatus.stability === 'unstable' && (
+                  <p className="text-xs text-warning">Signal is unstable — check your cable connection</p>
+                )}
+              </div>
+            )}
           </StepItem>
 
           {/* Ready button */}
-          <div className="pt-4 mt-2 border-t border-gray-800">
+          <div className="pt-4 mt-2 border-t border-surface-700">
             <button
               onClick={handleReady}
               disabled={phase !== 'ready'}
-              className={`w-full py-3 font-medium text-white rounded-lg transition-all ${
+              className={`w-full py-3 font-semibold rounded-lg transition-all ${
                 phase === 'ready'
-                  ? 'bg-studio-600 hover:bg-studio-700 shadow-lg shadow-studio-600/20'
-                  : 'bg-gray-700 opacity-60 cursor-not-allowed'
+                  ? 'bg-accent-400 hover:bg-accent-500 text-surface-950 shadow-lg shadow-accent-400/20'
+                  : 'bg-surface-700 text-surface-50 opacity-60 cursor-not-allowed'
               }`}
             >
               {phase === 'ready'
@@ -427,10 +461,10 @@ function StepItem({
   const isExpanded = status === 'active' || status === 'failed';
 
   const iconStyle = {
-    pending: 'bg-gray-700 text-gray-500',
-    active: 'bg-studio-600 text-white ring-2 ring-studio-400/30',
-    passed: 'bg-green-600 text-white',
-    failed: 'bg-red-600 text-white',
+    pending: 'bg-surface-700 text-surface-500',
+    active: 'bg-accent-400 text-surface-950 ring-2 ring-accent-400/30',
+    passed: 'bg-success text-surface-950',
+    failed: 'bg-danger text-surface-50',
   }[status];
 
   const icon = {
@@ -444,7 +478,7 @@ function StepItem({
     <div className={`relative pl-10 ${isLast ? '' : 'pb-6'}`}>
       {/* Vertical connector line */}
       {!isLast && (
-        <div className="absolute left-[15px] top-8 bottom-0 w-px bg-gray-800" />
+        <div className="absolute left-[15px] top-8 bottom-0 w-px bg-surface-700" />
       )}
 
       {/* Step circle */}
@@ -458,13 +492,13 @@ function StepItem({
       <div className="flex items-center gap-2 h-8">
         <span
           className={`font-medium ${
-            status === 'pending' ? 'text-gray-500' : 'text-white'
+            status === 'pending' ? 'text-surface-500' : 'text-surface-50'
           }`}
         >
           {label}
         </span>
         {statusText && (
-          <span className="text-sm text-gray-400">&middot; {statusText}</span>
+          <span className="text-sm text-surface-400">&middot; {statusText}</span>
         )}
       </div>
 

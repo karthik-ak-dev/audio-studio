@@ -68,9 +68,9 @@ export default function DeviceSelector({ onDeviceSelected, selectedDeviceId }: D
 
   return (
     <div>
-      <label className="block mb-1 text-sm text-gray-400">Microphone</label>
+      <label className="block mb-1 text-sm text-surface-400">Microphone</label>
       <select
-        className="w-full px-3 py-2 text-white bg-gray-800 border border-gray-700 rounded-lg"
+        className="w-full px-3 py-2 text-surface-50 bg-surface-800 border border-surface-600 rounded-lg"
         value={selectedDeviceId || ''}
         onChange={(e) => onDeviceSelected(e.target.value)}
       >

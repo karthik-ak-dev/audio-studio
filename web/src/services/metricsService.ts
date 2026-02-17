@@ -45,6 +45,7 @@ export interface AudioMetrics {
   clipCount: number;    // Number of clipped samples (≥0.99)
   silenceDuration: number; // ms since last speech detected
   speechDetected: boolean; // true if RMS > silence threshold
+  rmsStability: number; // stddev of RMS over rolling window (dB)
 }
 
 /** Threshold below which audio is considered silence (-50 dBFS) */
@@ -56,6 +57,10 @@ const CLIP_THRESHOLD = 0.99;
 /** Timestamp when silence began — 0 means not currently in silence */
 let silenceStartTime = 0;
 
+/** Rolling window of recent RMS values for stability computation (~0.5s at 60fps) */
+const RMS_HISTORY_SIZE = 30;
+const rmsHistory: number[] = [];
+
 /**
  * Compute audio metrics from a buffer of float audio samples.
  *
@@ -65,7 +70,7 @@ let silenceStartTime = 0;
  */
 export function computeMetrics(samples: Float32Array): AudioMetrics {
   if (samples.length === 0) {
-    return { rms: -Infinity, peak: -Infinity, clipCount: 0, silenceDuration: 0, speechDetected: false };
+    return { rms: -Infinity, peak: -Infinity, clipCount: 0, silenceDuration: 0, speechDetected: false, rmsStability: 0 };
   }
 
   let sum = 0;
@@ -100,7 +105,26 @@ export function computeMetrics(samples: Float32Array): AudioMetrics {
     silenceDuration = now - silenceStartTime;
   }
 
-  return { rms: rmsDb, peak: peakDb, clipCount, silenceDuration, speechDetected };
+  // Track RMS stability over rolling window
+  const clampedRms = rmsDb === -Infinity ? -80 : rmsDb;
+  rmsHistory.push(clampedRms);
+  if (rmsHistory.length > RMS_HISTORY_SIZE) rmsHistory.shift();
+
+  const rmsStability = computeRmsStability();
+
+  return { rms: rmsDb, peak: peakDb, clipCount, silenceDuration, speechDetected, rmsStability };
+}
+
+/**
+ * Reset module-level tracking state.
+ * Called when starting/stopping metrics to ensure clean state between sessions.
+ */
+/** Compute standard deviation of RMS values in the rolling window */
+function computeRmsStability(): number {
+  if (rmsHistory.length < 5) return 0; // Not enough data yet
+  const mean = rmsHistory.reduce((a, b) => a + b, 0) / rmsHistory.length;
+  const variance = rmsHistory.reduce((sum, v) => sum + (v - mean) ** 2, 0) / rmsHistory.length;
+  return Math.sqrt(variance);
 }
 
 /**
@@ -109,4 +133,5 @@ export function computeMetrics(samples: Float32Array): AudioMetrics {
  */
 export function resetMetrics(): void {
   silenceStartTime = 0;
+  rmsHistory.length = 0;
 }

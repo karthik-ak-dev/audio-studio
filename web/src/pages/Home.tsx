@@ -59,50 +59,50 @@ export default function Home() {
     <div className="flex items-center justify-center min-h-screen p-4">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <h1 className="mb-2 text-4xl font-bold text-white">Audio Studio</h1>
-          <p className="text-gray-400">High-quality audio recording for dataset collection</p>
+          <h1 className="mb-2 text-4xl font-bold text-surface-50">Audio Studio</h1>
+          <p className="text-surface-400">High-quality audio recording for dataset collection</p>
         </div>
 
         {/* Global error banner — shown when meeting creation fails */}
         {error && (
-          <div className="px-4 py-3 text-sm text-red-200 border border-red-500 rounded-lg bg-red-900/50">
+          <div className="px-4 py-3 text-sm text-danger-light border border-danger rounded-lg bg-danger-dark/50">
             {error}
           </div>
         )}
 
         {/* ── Create new session ─────────────────────────────────── */}
-        <form onSubmit={handleCreate} className="p-6 space-y-4 bg-gray-900 border border-gray-800 rounded-xl">
-          <h2 className="text-lg font-semibold text-white">Create New Session</h2>
+        <form onSubmit={handleCreate} className="p-6 space-y-4 bg-surface-900 border border-surface-700 rounded-xl">
+          <h2 className="text-lg font-semibold text-surface-50">Create New Session</h2>
           <input
             type="text"
             placeholder="Session title (optional)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-studio-500"
+            className="w-full bg-surface-800 border border-surface-600 rounded-lg px-4 py-2.5 text-surface-50 placeholder-surface-500 focus:outline-none focus:border-accent-400"
           />
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-studio-600 hover:bg-studio-700 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50"
+            className="w-full bg-accent-400 hover:bg-accent-500 text-surface-950 font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50"
           >
             {isLoading ? 'Creating...' : 'Create Session'}
           </button>
         </form>
 
         {/* ── Join existing session ──────────────────────────────── */}
-        <form onSubmit={handleJoin} className="p-6 space-y-4 bg-gray-900 border border-gray-800 rounded-xl">
-          <h2 className="text-lg font-semibold text-white">Join Session</h2>
+        <form onSubmit={handleJoin} className="p-6 space-y-4 bg-surface-900 border border-surface-700 rounded-xl">
+          <h2 className="text-lg font-semibold text-surface-50">Join Session</h2>
           <input
             type="text"
             placeholder="Enter meeting ID or paste link"
             value={joinId}
             onChange={(e) => setJoinId(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-studio-500"
+            className="w-full bg-surface-800 border border-surface-600 rounded-lg px-4 py-2.5 text-surface-50 placeholder-surface-500 focus:outline-none focus:border-accent-400"
           />
           <button
             type="submit"
             disabled={!joinId.trim()}
-            className="w-full bg-gray-700 hover:bg-gray-600 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50"
+            className="w-full bg-surface-700 hover:bg-surface-600 text-surface-50 font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50"
           >
             Join Session
           </button>
