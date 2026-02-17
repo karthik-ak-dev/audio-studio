@@ -52,14 +52,24 @@ const MIN_STEP_DISPLAY = 600;
 
 // ── Component ────────────────────────────────────────────────
 
+const DEV_SKIP = import.meta.env.VITE_SKIP_GREEN_ROOM === 'true';
+
 export default function GreenRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+
+  // ── Dev skip — bypass all green room checks ──────────────
+  useEffect(() => {
+    if (DEV_SKIP && roomId) {
+      navigate(`/room/${roomId}`, { replace: true });
+    }
+  }, [roomId, navigate]);
 
   // ── Identity gate ─────────────────────────────────────────
   // Redirect to Home if user hasn't entered name/email yet.
   // This covers the case where a guest clicks an invite link directly.
   useEffect(() => {
+    if (DEV_SKIP) return;
     const hasIdentity = localStorage.getItem('userName') && localStorage.getItem('userEmail');
     if (!hasIdentity && roomId) {
       navigate(`/?room=${roomId}`, { replace: true });

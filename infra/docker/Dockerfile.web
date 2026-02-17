@@ -11,6 +11,10 @@ COPY web/tsconfig.json web/vite.config.ts web/tailwind.config.js web/postcss.con
 COPY web/src/ ./src/
 COPY web/public/ ./public/
 
+# Vite env vars (baked in at build time)
+ARG VITE_SKIP_GREEN_ROOM=false
+ENV VITE_SKIP_GREEN_ROOM=$VITE_SKIP_GREEN_ROOM
+
 # Build
 RUN npm run build
 
