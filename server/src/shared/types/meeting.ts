@@ -34,7 +34,7 @@ export type MeetingStatus = (typeof MEETING_STATUSES)[number];
 
 // ─── Meeting ──────────────────────────────────────────────────────
 // Represents a scheduled or in-progress recording session between
-// a host and up to two guests. Each meeting has a unique ID and
+// a host and one guest. Each meeting has a unique ID and
 // tracks the email assignments for participants.
 //
 // DynamoDB Table: AudioStudio_Meetings
@@ -42,11 +42,10 @@ export type MeetingStatus = (typeof MEETING_STATUSES)[number];
 export interface Meeting {
   meetingId: string;            // UUID — unique identifier for the meeting
   title: string;                // Human-readable meeting title (max 255 chars)
-  hostEmail: string | null;     // Email of the host; null until assigned via assign-host
-  guestAName: string | null;    // Display name for guest slot A
-  guestAEmail: string | null;   // Email for guest slot A; null until assigned
-  guestBName: string | null;    // Display name for guest slot B
-  guestBEmail: string | null;   // Email for guest slot B; null until assigned
+  hostName: string | null;      // Display name for the host
+  hostEmail: string | null;     // Email of the host; null until assigned
+  guestName: string | null;     // Display name for the guest
+  guestEmail: string | null;    // Email for the guest; null until assigned
   scheduledTime: string | null; // ISO 8601 timestamp for when the meeting is scheduled
   status: MeetingStatus;        // Current lifecycle status
   createdAt: string;            // ISO 8601 timestamp when the meeting was created

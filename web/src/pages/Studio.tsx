@@ -81,6 +81,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import type { RecordingWarningPayload, QualityUpdatePayload } from '../shared';
+import { ROLES } from '../shared';
 import { useSocket } from '@/hooks/useSocket';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useRecorder } from '@/hooks/useRecorder';
@@ -125,10 +126,12 @@ export default function Studio() {
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   /**
-   * Persistent user ID — stored in localStorage so the server can detect
-   * reconnections (same userId, new socketId) vs. new users.
+   * Persistent user identity — stored in localStorage so the server can detect
+   * reconnections (same userId, new socketId) vs. new users. Name and email
+   * are set by the Home page when creating/joining a session.
    */
   const userId = useRef(localStorage.getItem('userId') || `user_${crypto.randomUUID()}`);
+  const userEmail = useRef(localStorage.getItem('userEmail') || undefined);
   useEffect(() => {
     localStorage.setItem('userId', userId.current);
   }, []);
@@ -196,8 +199,9 @@ export default function Studio() {
   } = useSocket(
     {
       roomId: roomId || '',
-      role: 'host', // Initial role — server may reassign based on join order
+      role: ROLES.HOST, // Initial role — server reassigns based on join order
       userId: userId.current,
+      userEmail: userEmail.current,
     },
     {
       /**
@@ -403,6 +407,8 @@ export default function Studio() {
 
   const participants = roomState?.participants || [];
   const peerConnected = participants.length > 1;
+  const myRole = participants.find((p) => p.userId === userId.current)?.role;
+  const isHost = myRole === ROLES.HOST;
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -467,8 +473,9 @@ export default function Studio() {
             ))}
             {/* Placeholder shown when waiting for the second participant */}
             {participants.length < 2 && (
-              <div className="flex items-center justify-center flex-1 px-4 py-3 text-sm text-surface-500 bg-surface-900 border border-surface-700 border-dashed rounded-lg">
-                Waiting for partner...
+              <div className="flex-1 px-4 py-3 bg-surface-900 border border-surface-700 border-dashed rounded-lg">
+                <p className="mb-2 text-sm text-surface-500">Waiting for partner...</p>
+                <InviteLink roomId={roomId || ''} />
               </div>
             )}
           </div>
@@ -485,16 +492,18 @@ export default function Studio() {
             </div>
           )}
 
-          {/* ── Recording controls ───────────────────────────────── */}
+          {/* ── Recording controls (host) / status (guest) ─────── */}
           <div className="flex items-center gap-4">
             {recorder.isRecording ? (
               <>
-                <button
-                  onClick={emitStopRecording}
-                  className="px-6 py-3 font-medium text-surface-50 transition-colors bg-danger rounded-lg hover:bg-danger-light"
-                >
-                  Stop Recording
-                </button>
+                {isHost && (
+                  <button
+                    onClick={emitStopRecording}
+                    className="px-6 py-3 font-medium text-surface-50 transition-colors bg-danger rounded-lg hover:bg-danger-light"
+                  >
+                    Stop Recording
+                  </button>
+                )}
                 {/* Pulsing red dot + duration timer */}
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-danger rounded-full animate-pulse" />
@@ -502,8 +511,11 @@ export default function Studio() {
                     {formatDuration(recorder.recordingDuration)}
                   </span>
                 </div>
+                {!isHost && (
+                  <span className="text-sm text-surface-400">Recording in progress...</span>
+                )}
               </>
-            ) : (
+            ) : isHost ? (
               <button
                 onClick={emitStartRecording}
                 disabled={!peerConnected}
@@ -511,6 +523,12 @@ export default function Studio() {
               >
                 {peerConnected ? 'Start Recording' : 'Waiting for partner...'}
               </button>
+            ) : (
+              <p className="text-sm text-surface-400">
+                {peerConnected
+                  ? 'Waiting for host to start recording...'
+                  : 'Waiting for host to join...'}
+              </p>
             )}
           </div>
 
@@ -547,6 +565,37 @@ export default function Studio() {
 
       {/* Hidden audio element for playing the remote peer's stream */}
       <audio ref={remoteAudioRef} autoPlay />
+    </div>
+  );
+}
+
+// ── InviteLink Component ────────────────────────────────────
+
+function InviteLink({ roomId }: { roomId: string }) {
+  const [copied, setCopied] = useState(false);
+  const inviteUrl = `${window.location.origin}/room/${roomId}/green-room`;
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        readOnly
+        value={inviteUrl}
+        className="flex-1 px-3 py-1.5 text-xs bg-surface-800 border border-surface-600 rounded text-surface-300 truncate"
+        onFocus={(e) => e.target.select()}
+      />
+      <button
+        onClick={handleCopy}
+        className="px-3 py-1.5 text-xs font-medium rounded bg-surface-700 hover:bg-surface-600 text-surface-300 whitespace-nowrap"
+      >
+        {copied ? 'Copied!' : 'Copy Link'}
+      </button>
     </div>
   );
 }

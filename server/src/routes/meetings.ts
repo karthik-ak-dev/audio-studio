@@ -76,23 +76,25 @@ router.patch(
 );
 
 // POST /api/meetings/:id/assign-host — Claim the host slot for this meeting
+// Body: { email: string, name?: string }
 // Uses a DynamoDB conditional write so only the first caller succeeds (race-safe)
 router.post('/:id/assign-host', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const assigned = await meetingService.assignHost(req.params.id as string, req.body.email);
+    const { email, name } = req.body;
+    const assigned = await meetingService.assignHost(req.params.id as string, email, name);
     res.json({ assigned });
   } catch (err) {
     next(err);
   }
 });
 
-// POST /api/meetings/:id/assign-guest — Claim a guest slot (A or B) for this meeting
-// Body: { slot: 'A' | 'B', email: string, name: string }
+// POST /api/meetings/:id/assign-guest — Claim the guest slot for this meeting
+// Body: { email: string, name: string }
 // Uses a DynamoDB conditional write for race safety
 router.post('/:id/assign-guest', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { slot, email, name } = req.body;
-    const assigned = await meetingService.assignGuest(req.params.id as string, slot, email, name);
+    const { email, name } = req.body;
+    const assigned = await meetingService.assignGuest(req.params.id as string, email, name);
     res.json({ assigned });
   } catch (err) {
     next(err);

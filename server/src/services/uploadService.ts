@@ -22,7 +22,7 @@
  *     5. Complete the multipart upload with the corrected Part 1
  */
 import type { Recording } from '../shared';
-import { LIMITS } from '../shared';
+import { LIMITS, RECORDING_STATUS } from '../shared';
 import * as s3 from '../infra/s3';
 import * as recordingRepo from '../repositories/recordingRepo';
 import { ValidationError, NotFoundError } from '../utils/errors';
@@ -73,7 +73,7 @@ export async function completeUpload(
     s3Url: null,
     uploadedAt: new Date().toISOString(),
     uploadId: null,
-    status: 'completed',
+    status: RECORDING_STATUS.COMPLETED,
   };
 
   await recordingRepo.createRecording(recording);
@@ -110,7 +110,7 @@ export async function initiateMultipart(
     s3Url: null,
     uploadedAt: new Date().toISOString(),
     uploadId: result.uploadId,
-    status: 'uploading',
+    status: RECORDING_STATUS.UPLOADING,
   };
   await recordingRepo.createRecording(recording);
 
@@ -182,7 +182,7 @@ export async function completeMultipart(
     await recordingRepo.updateRecordingStatus(
       roomId,
       recordingId,
-      'completed',
+      RECORDING_STATUS.COMPLETED,
       result.Location,
     );
   }

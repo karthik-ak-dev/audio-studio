@@ -37,6 +37,13 @@ export type { QualityProfile } from './constants/thresholds';
 export { SOCKET_EVENTS } from './constants/events';
 export type { SocketEvent } from './constants/events';
 
+export {
+  ROLES, MEETING_STATUS, RECORDING_STATUS,
+  MIC_LEVEL, NOISE_FLOOR_LEVEL, SNR_LEVEL, SIGNAL_STABILITY, SPECTRAL_WARNING,
+  WARNING_TYPE, SEVERITY, QUALITY_PROFILE,
+} from './constants/enums';
+export type { Role } from './constants/enums';
+
 export type {
   Meeting,
   MeetingStatus,

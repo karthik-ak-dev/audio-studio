@@ -37,7 +37,7 @@
  * sessions per user over time while keeping each unique.
  */
 import type { Server as SocketIOServer, Socket } from 'socket.io';
-import { SOCKET_EVENTS, LIMITS } from '../shared';
+import { SOCKET_EVENTS, LIMITS, ROLES } from '../shared';
 import * as sessionRepo from '../repositories/sessionRepo';
 import * as recordingStateRepo from '../repositories/recordingStateRepo';
 import * as statsRepo from '../repositories/statsRepo';
@@ -45,6 +45,13 @@ import * as meetingService from '../services/meetingService';
 import { logger } from '../utils/logger';
 
 export function handleSession(io: SocketIOServer, socket: Socket): void {
+  // Per-socket mutex: prevent concurrent join-room processing.
+  // Without this, Socket.IO reconnection storms or React re-renders can fire
+  // multiple join-room events simultaneously. All hit findAllActiveByUserId()
+  // at the same time, all see 0 sessions, all create new rows → activeCount
+  // explodes from 1 to 100+ in seconds.
+  let joinInProgress = false;
+
   // ─── Join Room ─────────────────────────────────────────────────
   socket.on(SOCKET_EVENTS.JOIN_ROOM, async ({ roomId, role, userId, userEmail }) => {
     try {
@@ -54,43 +61,90 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
         return;
       }
 
+      // Mutex: if a join is already being processed for this socket, ignore.
+      if (joinInProgress) {
+        logger.info('Join already in progress, ignoring duplicate', { socketId: socket.id, roomId });
+        return;
+      }
+      joinInProgress = true;
+
+      // Guard: if this socket already joined this room, just re-send room state.
+      // Prevents duplicate DynamoDB session rows from GreenRoom→Studio navigation,
+      // React strict mode double-mounts, or accidental double calls.
+      if (socket.roomId === roomId && socket.userId) {
+        logger.info('Socket already in room, re-sending state', { socketId: socket.id, roomId });
+        const meeting = await meetingService.getOrCreateMeeting(roomId);
+        const recordingState = await recordingStateRepo.getOrCreateDefault(roomId);
+        const activeSessions = await sessionRepo.getActiveSessionsByMeeting(roomId);
+        const participants = activeSessions.map((s) => ({
+          socketId: s.socketId, userId: s.userId, role: s.userRole, userEmail: s.userEmail,
+        }));
+        socket.emit(SOCKET_EVENTS.ROOM_STATE, { meeting, participants, recordingState });
+        return;
+      }
+
       // Lazy meeting creation — the first person to join creates the meeting
       const meeting = await meetingService.getOrCreateMeeting(roomId);
 
       // ─── Reconnection Detection ─────────────────────────────
-      // Look up any existing active session for this userId in this room.
-      // If found, this is a reconnection (e.g., page refresh, new tab).
+      // Look up existing sessions for this userId — both active AND recently
+      // deactivated (within 10s). This handles the page-refresh race where
+      // the disconnect handler fires before the new join-room arrives,
+      // marking the session inactive. Without checking recently-deactivated
+      // sessions, every refresh would create a new session row.
       let isReconnection = false;
       let effectiveRole = role;
       let effectiveEmail = userEmail || '';
       let effectiveUserId = userId || `user_${socket.id}`;
 
-      const previousSession = userId
-        ? await sessionRepo.findActiveByUserId(userId)
-        : null;
+      const previousSessions = userId
+        ? await sessionRepo.findRecentByUserId(userId)
+        : [];
 
-      if (previousSession && previousSession.meetingId === roomId) {
-        // ─── Reconnection: Clean Up Ghost Socket ────────────
-        const oldSocketId = previousSession.socketId;
-        if (oldSocketId && oldSocketId !== socket.id) {
-          // Tell the old tab it's been superseded
-          io.to(oldSocketId).emit(SOCKET_EVENTS.DUPLICATE_SESSION, {
-            message: 'Meeting opened in another tab',
+      // Filter to sessions in THIS room
+      const sessionsInRoom = previousSessions.filter((s) => s.meetingId === roomId);
+      // Also clean up any sessions in OTHER rooms (user navigated away without disconnect)
+      const sessionsInOtherRooms = previousSessions.filter((s) => s.meetingId !== roomId);
+
+      // Mark sessions in other rooms as inactive (idempotent if already inactive)
+      for (const stale of sessionsInOtherRooms) {
+        if (stale.isActive) {
+          await sessionRepo.markSessionInactive(stale.meetingId, stale.sessionId);
+          logger.info('Cleaned up stale session in other room', {
+            meetingId: stale.meetingId, sessionId: stale.sessionId, userId,
           });
+        }
+      }
 
-          // Force-disconnect the ghost socket
-          const oldSocket = io.sockets.sockets.get(oldSocketId);
-          if (oldSocket) {
-            logger.info('Cleaning up ghost session', { oldSocketId, userId });
-            oldSocket.disconnect(true);
+      if (sessionsInRoom.length > 0) {
+        // Use the most recent session to preserve role/email
+        const previousSession = sessionsInRoom[0];
 
-            // Brief delay for the adapter to remove the old socket from the room
-            // (prevents both sockets being in the room → double audio streams)
-            await new Promise((resolve) => setTimeout(resolve, LIMITS.GHOST_SOCKET_DELAY_MS));
+        // ─── Reconnection: Clean Up Ghost Sockets ─────────
+        for (const session of sessionsInRoom) {
+          const oldSocketId = session.socketId;
+          if (oldSocketId && oldSocketId !== socket.id) {
+            io.to(oldSocketId).emit(SOCKET_EVENTS.DUPLICATE_SESSION, {
+              message: 'Meeting opened in another tab',
+            });
+
+            const oldSocket = io.sockets.sockets.get(oldSocketId);
+            if (oldSocket) {
+              logger.info('Cleaning up ghost session', { oldSocketId, userId });
+              oldSocket.disconnect(true);
+            }
           }
         }
 
-        // Point the existing DynamoDB session to this new socket ID
+        // Brief delay for the adapter to remove old sockets from the room
+        await new Promise((resolve) => setTimeout(resolve, LIMITS.GHOST_SOCKET_DELAY_MS));
+
+        // Mark ALL old sessions in this room as inactive, then reuse the most recent
+        for (const session of sessionsInRoom.slice(1)) {
+          await sessionRepo.markSessionInactive(session.meetingId, session.sessionId);
+        }
+
+        // Point the surviving session to this new socket ID
         await sessionRepo.updateSocketId(
           previousSession.meetingId,
           previousSession.sessionId,
@@ -115,6 +169,10 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
           socket.disconnect(true);
           return;
         }
+
+        // ─── Server-Side Role Assignment ──────────────────────
+        // First joiner is 'host', second is 'guest'. Don't trust the client.
+        effectiveRole = activeCount === 0 ? ROLES.HOST : ROLES.GUEST;
 
         // ─── New User: Create Session in DynamoDB ───────────
         // sessionId is a composite key: `${userId}#${timestamp}` to allow
@@ -203,6 +261,8 @@ export function handleSession(io: SocketIOServer, socket: Socket): void {
         stack: (err as Error).stack,
       });
       socket.emit(SOCKET_EVENTS.ERROR, { message: 'Failed to join room' });
+    } finally {
+      joinInProgress = false;
     }
   });
 

@@ -7,7 +7,7 @@
  * ## DynamoDB Tables (server-side)
  *
  * - **Meetings table** → Meeting interface
- *   PK: meetingId, Status tracking, 2-participant support (guestA/guestB)
+ *   PK: meetingId, Status tracking, host + guest participant support
  *
  * - **Sessions table** → Session interface
  *   PK: meetingId, SK: sessionId, Tracks socket connections per user
@@ -46,18 +46,16 @@ export type MeetingStatus = (typeof MEETING_STATUSES)[number];
 /**
  * Meeting — top-level meeting entity from DynamoDB Meetings table.
  *
- * Created via POST /api/meetings. Supports up to 2 participants
- * (host + guest), though the schema has slots for guestA and guestB
- * for potential future expansion.
+ * Created via POST /api/meetings. Supports exactly 2 participants
+ * (host + guest).
  */
 export interface Meeting {
   meetingId: string;
   title: string;
+  hostName: string | null;
   hostEmail: string | null;
-  guestAName: string | null;
-  guestAEmail: string | null;
-  guestBName: string | null;
-  guestBEmail: string | null;
+  guestName: string | null;
+  guestEmail: string | null;
   scheduledTime: string | null;
   status: MeetingStatus;
   createdAt: string;             // ISO 8601 timestamp

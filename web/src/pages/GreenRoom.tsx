@@ -10,11 +10,18 @@
  * single-snapshot evaluation, so pauses between sentences don't reset progress.
  *
  * Flow: Home → GreenRoom (this page) → Studio → Results
+ *
+ * Identity gate: If the user hasn't entered their name/email on the Home page
+ * (e.g., they followed an invite link directly), they are redirected to Home
+ * with `?room=roomId` so the Join Session tab is pre-filled.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { SOCKET_EVENTS } from '../shared';
+import {
+  SOCKET_EVENTS, MIC_LEVEL, NOISE_FLOOR_LEVEL, SNR_LEVEL,
+  SIGNAL_STABILITY, SPECTRAL_WARNING,
+} from '../shared';
 import type { MicStatus } from '../shared';
 import { useAudioMetrics } from '@/hooks/useAudioMetrics';
 import VolumeIndicator from '@/components/VolumeIndicator';
@@ -49,6 +56,16 @@ export default function GreenRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
 
+  // ── Identity gate ─────────────────────────────────────────
+  // Redirect to Home if user hasn't entered name/email yet.
+  // This covers the case where a guest clicks an invite link directly.
+  useEffect(() => {
+    const hasIdentity = localStorage.getItem('userName') && localStorage.getItem('userEmail');
+    if (!hasIdentity && roomId) {
+      navigate(`/?room=${roomId}`, { replace: true });
+    }
+  }, [roomId, navigate]);
+
   // ── Device state ───────────────────────────────────────────
   const [deviceId, setDeviceId] = useState<string>('');
   const [deviceLabel, setDeviceLabel] = useState<string>('');
@@ -71,6 +88,9 @@ export default function GreenRoom() {
   // ── Refs for interval access ───────────────────────────────
   const metricsRef = useRef(metrics);
   metricsRef.current = metrics;
+
+  // ── Track whether we're navigating to Studio (clean exit) ──
+  const navigatingToStudioRef = useRef(false);
 
   // ── Noise floor estimator (EMA on quiet frames) ────────────
   const noiseFloorRef = useRef(-60);
@@ -183,7 +203,7 @@ export default function GreenRoom() {
         data,
       ];
 
-      const good = statusHistoryRef.current.filter((s) => s.level === 'good' && s.speechVerified).length;
+      const good = statusHistoryRef.current.filter((s) => s.level === MIC_LEVEL.GOOD && s.speechVerified).length;
       setGoodFrameCount(good);
       setNoiseResult(data.noiseFloor);
     };
@@ -232,8 +252,8 @@ export default function GreenRoom() {
       const elapsed = Date.now() - phaseEnteredAtRef.current;
       const delay = Math.max(0, MIN_STEP_DISPLAY - elapsed);
 
-      const snrBlocking = latestStatus.snr === 'blocking';
-      const hasBlockingIssue = noiseResult === 'unacceptable' || snrBlocking;
+      const snrBlocking = latestStatus.snr === SNR_LEVEL.BLOCKING;
+      const hasBlockingIssue = noiseResult === NOISE_FLOOR_LEVEL.UNACCEPTABLE || snrBlocking;
 
       setTimeout(() => {
         if (!hasBlockingIssue) {
@@ -248,6 +268,7 @@ export default function GreenRoom() {
 
   // ── Navigate to Studio ─────────────────────────────────────
   const handleReady = useCallback(() => {
+    navigatingToStudioRef.current = true;
     stopMetrics();
     stream?.getTracks().forEach((t) => t.stop());
     navigate(`/room/${roomId}`);
@@ -267,7 +288,11 @@ export default function GreenRoom() {
     return () => {
       stopMetrics();
       stream?.getTracks().forEach((t) => t.stop());
-      disconnectSocket();
+      // Only disconnect the socket on unexpected unmount (back button, page close).
+      // When navigating to Studio, the socket must stay alive for useSocket to reuse.
+      if (!navigatingToStudioRef.current) {
+        disconnectSocket();
+      }
       window.clearTimeout(levelHintTimerRef.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -346,9 +371,9 @@ export default function GreenRoom() {
               {/* Hint after timeout with no good frames */}
               {showLevelHint && latestStatus && (
                 <div className="px-3 py-2 text-sm border rounded-lg bg-warning-dark/30 border-warning/40 text-warning">
-                  {latestStatus.level === 'too-quiet'
+                  {latestStatus.level === MIC_LEVEL.TOO_QUIET
                     ? 'We can barely hear you. Try moving closer to your microphone or increasing the input volume.'
-                    : latestStatus.level === 'too-loud'
+                    : latestStatus.level === MIC_LEVEL.TOO_LOUD
                       ? 'Your microphone is too loud. Try moving back or reducing the input volume.'
                       : 'Try speaking at a normal conversational volume.'}
                 </div>
@@ -363,13 +388,13 @@ export default function GreenRoom() {
             status={checkState.environment}
             statusText={
               checkState.environment === 'passed'
-                ? noiseResult === 'noisy'
+                ? noiseResult === NOISE_FLOOR_LEVEL.NOISY
                   ? 'Some background noise -- consider a quieter room'
-                  : latestStatus?.snr === 'fair'
+                  : latestStatus?.snr === SNR_LEVEL.FAIR
                     ? 'Signal quality is fair -- a quieter room would help'
                     : 'Your room sounds quiet'
                 : checkState.environment === 'failed'
-                  ? latestStatus?.snr === 'blocking'
+                  ? latestStatus?.snr === SNR_LEVEL.BLOCKING
                     ? 'Signal-to-noise ratio too low'
                     : 'Too much background noise'
                   : undefined
@@ -382,11 +407,11 @@ export default function GreenRoom() {
             {checkState.environment === 'failed' && (
               <div className="space-y-2">
                 <p className="text-sm text-danger-light">
-                  {latestStatus?.snr === 'blocking'
+                  {latestStatus?.snr === SNR_LEVEL.BLOCKING
                     ? 'Signal-to-noise ratio is too low for a quality recording. Reduce background noise or move closer to the microphone.'
                     : 'Please move to a quieter space. Background noise will affect recording quality.'}
                 </p>
-                {latestStatus?.spectralWarnings.includes('hum-detected') && (
+                {latestStatus?.spectralWarnings.includes(SPECTRAL_WARNING.HUM_DETECTED) && (
                   <p className="text-sm text-warning">
                     Electrical hum detected — try a different USB port or move away from power sources.
                   </p>
@@ -402,13 +427,13 @@ export default function GreenRoom() {
             {/* Advisory spectral warnings (shown when passed but with issues) */}
             {checkState.environment === 'passed' && latestStatus && latestStatus.spectralWarnings.length > 0 && (
               <div className="mt-2 space-y-1">
-                {latestStatus.spectralWarnings.includes('muffled') && (
+                {latestStatus.spectralWarnings.includes(SPECTRAL_WARNING.MUFFLED) && (
                   <p className="text-xs text-warning">Audio sounds muffled — check that nothing is covering your microphone</p>
                 )}
-                {latestStatus.spectralWarnings.includes('hum-detected') && (
+                {latestStatus.spectralWarnings.includes(SPECTRAL_WARNING.HUM_DETECTED) && (
                   <p className="text-xs text-warning">Electrical hum detected — try a different USB port</p>
                 )}
-                {latestStatus.stability === 'unstable' && (
+                {latestStatus.stability === SIGNAL_STABILITY.UNSTABLE && (
                   <p className="text-xs text-warning">Signal is unstable — check your cable connection</p>
                 )}
               </div>

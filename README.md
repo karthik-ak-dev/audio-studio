@@ -238,7 +238,7 @@ User types meetingId → clicks "Join Session"
   - Validates title (non-empty, ≤ 255 chars)
   - Generates UUID v4 for meetingId
   - Sets `status: 'scheduled'`, `createdAt: new Date().toISOString()`
-  - All participant fields (`hostEmail`, `guestAName`, etc.) initialized to `null`
+  - All participant fields (`hostName`, `hostEmail`, `guestName`, `guestEmail`) initialized to `null`
 - **Repository**: `meetingRepo.createMeeting(meeting)` — DynamoDB PutItem
 
 ---
@@ -1091,11 +1091,10 @@ SOCKET_EVENTS = {
 |-----------|------|-------------|
 | meetingId | S | UUID v4 (primary key) |
 | title | S | Session title |
+| hostName | S/null | Host display name |
 | hostEmail | S/null | Assigned host email |
-| guestAName | S/null | Guest A display name |
-| guestAEmail | S/null | Guest A email |
-| guestBName | S/null | Guest B display name |
-| guestBEmail | S/null | Guest B email |
+| guestName | S/null | Guest display name |
+| guestEmail | S/null | Guest email |
 | scheduledTime | S/null | ISO 8601 scheduled time |
 | status | S | scheduled / active / recording / completed / cancelled |
 | createdAt | S | ISO 8601 creation time |
@@ -1107,7 +1106,7 @@ SOCKET_EVENTS = {
 - `getAllMeetings()` — Scan (admin only)
 - `updateStatus()` — UpdateItem SET status
 - `assignHostEmail()` — UpdateItem with condition `attribute_not_exists(hostEmail) OR hostEmail = :empty`
-- `assignGuestEmail()` — UpdateItem with condition on guest slot
+- `assignGuestEmail()` — UpdateItem with condition `attribute_not_exists(guestEmail) OR guestEmail = :empty`
 - `deleteMeeting()` — DeleteItem
 
 ### Table: `AudioStudio_Sessions`

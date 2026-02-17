@@ -27,6 +27,7 @@
  */
 
 import type { RecordingWarningPayload } from '../shared';
+import { SEVERITY } from '../shared';
 
 interface WarningBannerProps {
   warnings: RecordingWarningPayload[];
@@ -41,7 +42,7 @@ export default function WarningBanner({ warnings }: WarningBannerProps) {
         <div
           key={`${warning.type}-${i}`}
           className={`px-4 py-2 rounded-lg text-sm ${
-            warning.severity === 'critical'
+            warning.severity === SEVERITY.CRITICAL
               ? 'bg-danger-dark/50 border border-danger text-danger-light'
               : 'bg-warning-dark/50 border border-warning text-warning-light'
           }`}

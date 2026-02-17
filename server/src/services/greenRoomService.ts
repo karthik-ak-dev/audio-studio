@@ -19,7 +19,10 @@
  *
  * Used by socket/greenRoom.ts → MIC_CHECK event handler.
  */
-import { AUDIO_THRESHOLDS } from '../shared';
+import {
+  AUDIO_THRESHOLDS, MIC_LEVEL, NOISE_FLOOR_LEVEL, SNR_LEVEL,
+  SIGNAL_STABILITY, SPECTRAL_WARNING,
+} from '../shared';
 import type { MicCheckMetrics, MicStatus, SpectralWarning } from '../shared';
 
 /**
@@ -31,49 +34,49 @@ export function evaluate(metrics: MicCheckMetrics): MicStatus {
   // ── Volume level ────────────────────────────────────────────
   const level: MicStatus['level'] =
     metrics.rms < AUDIO_THRESHOLDS.MIC_TOO_QUIET
-      ? 'too-quiet'
+      ? MIC_LEVEL.TOO_QUIET
       : metrics.rms > AUDIO_THRESHOLDS.MIC_TOO_LOUD
-        ? 'too-loud'
-        : 'good';
+        ? MIC_LEVEL.TOO_LOUD
+        : MIC_LEVEL.GOOD;
 
   // ── Noise floor ─────────────────────────────────────────────
   const noiseFloor: MicStatus['noiseFloor'] =
     metrics.noiseFloor > AUDIO_THRESHOLDS.NOISE_FLOOR_REJECT
-      ? 'unacceptable'
+      ? NOISE_FLOOR_LEVEL.UNACCEPTABLE
       : metrics.noiseFloor > AUDIO_THRESHOLDS.NOISE_FLOOR_NOISY
-        ? 'noisy'
-        : 'clean';
+        ? NOISE_FLOOR_LEVEL.NOISY
+        : NOISE_FLOOR_LEVEL.CLEAN;
 
   // ── SNR computation ─────────────────────────────────────────
   const snrValue = metrics.rms - metrics.noiseFloor;
   const snr: MicStatus['snr'] =
     snrValue < AUDIO_THRESHOLDS.GREEN_ROOM_SNR_BLOCK
-      ? 'blocking'
+      ? SNR_LEVEL.BLOCKING
       : snrValue < AUDIO_THRESHOLDS.GREEN_ROOM_SNR_WARN
-        ? 'poor'
+        ? SNR_LEVEL.POOR
         : snrValue < AUDIO_THRESHOLDS.GREEN_ROOM_SNR_GOOD
-          ? 'fair'
-          : 'good';
+          ? SNR_LEVEL.FAIR
+          : SNR_LEVEL.GOOD;
 
   // ── Speech verification ─────────────────────────────────────
-  const speechVerified = metrics.speechLikely && level !== 'too-quiet';
+  const speechVerified = metrics.speechLikely && level !== MIC_LEVEL.TOO_QUIET;
 
   // ── Signal stability ────────────────────────────────────────
   const stability: MicStatus['stability'] =
     metrics.rmsStability > AUDIO_THRESHOLDS.RMS_STABILITY_MAX_STDDEV
-      ? 'unstable'
-      : 'stable';
+      ? SIGNAL_STABILITY.UNSTABLE
+      : SIGNAL_STABILITY.STABLE;
 
   // ── Spectral warnings ──────────────────────────────────────
   const spectralWarnings: SpectralWarning[] = [];
   if (metrics.highFreqEnergy < AUDIO_THRESHOLDS.HIGH_FREQ_ENERGY_MIN && metrics.speechLikely) {
-    spectralWarnings.push('muffled');
+    spectralWarnings.push(SPECTRAL_WARNING.MUFFLED);
   }
   if (metrics.humDetected) {
-    spectralWarnings.push('hum-detected');
+    spectralWarnings.push(SPECTRAL_WARNING.HUM_DETECTED);
   }
   if (metrics.spectralFlatness > AUDIO_THRESHOLDS.SPECTRAL_FLATNESS_MAX && metrics.rms > AUDIO_THRESHOLDS.MIC_TOO_QUIET) {
-    spectralWarnings.push('noise-like');
+    spectralWarnings.push(SPECTRAL_WARNING.NOISE_LIKE);
   }
 
   // ── Build suggestions ───────────────────────────────────────
@@ -96,10 +99,10 @@ function buildSuggestions(
   const suggestions: string[] = [];
 
   // ── Volume suggestions (existing) ──────────────────────────
-  if (level === 'too-quiet') {
+  if (level === MIC_LEVEL.TOO_QUIET) {
     suggestions.push('Move closer to your microphone or increase input gain');
   }
-  if (level === 'too-loud') {
+  if (level === MIC_LEVEL.TOO_LOUD) {
     suggestions.push('Move away from your microphone or reduce input gain');
   }
   if (isClipping) {
@@ -107,33 +110,33 @@ function buildSuggestions(
   }
 
   // ── Noise floor suggestions (existing) ─────────────────────
-  if (noiseFloor === 'noisy') {
+  if (noiseFloor === NOISE_FLOOR_LEVEL.NOISY) {
     suggestions.push('Background noise detected — try a quieter room or use a noise-isolating mic');
   }
-  if (noiseFloor === 'unacceptable') {
+  if (noiseFloor === NOISE_FLOOR_LEVEL.UNACCEPTABLE) {
     suggestions.push('Too much background noise — recording quality will be poor. Please move to a quieter space');
   }
 
   // ── SNR suggestions ────────────────────────────────────────
-  if (snr === 'blocking') {
+  if (snr === SNR_LEVEL.BLOCKING) {
     suggestions.push('Signal-to-noise ratio is too low for recording — reduce background noise or move closer to the microphone');
-  } else if (snr === 'poor') {
+  } else if (snr === SNR_LEVEL.POOR) {
     suggestions.push('Signal-to-noise ratio is marginal — consider reducing background noise');
   }
 
   // ── Stability suggestions ──────────────────────────────────
-  if (stability === 'unstable') {
+  if (stability === SIGNAL_STABILITY.UNSTABLE) {
     suggestions.push('Audio signal is unstable — check your cable connection or try a different USB port');
   }
 
   // ── Spectral suggestions ───────────────────────────────────
-  if (spectralWarnings.includes('muffled')) {
+  if (spectralWarnings.includes(SPECTRAL_WARNING.MUFFLED)) {
     suggestions.push('Audio sounds muffled — check that nothing is covering your microphone');
   }
-  if (spectralWarnings.includes('hum-detected')) {
+  if (spectralWarnings.includes(SPECTRAL_WARNING.HUM_DETECTED)) {
     suggestions.push('Electrical hum detected — try a different USB port or move away from power sources');
   }
-  if (spectralWarnings.includes('noise-like')) {
+  if (spectralWarnings.includes(SPECTRAL_WARNING.NOISE_LIKE)) {
     suggestions.push('Signal sounds like noise rather than speech — check your microphone selection');
   }
 

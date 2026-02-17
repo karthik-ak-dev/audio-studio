@@ -15,6 +15,7 @@
  */
 import { v4 as uuid } from 'uuid';
 import type { Meeting, MeetingStatus } from '../shared';
+import { MEETING_STATUS } from '../shared';
 import * as meetingRepo from '../repositories/meetingRepo';
 import { NotFoundError, ConflictError, ValidationError } from '../utils/errors';
 import { validateTitle, validateEmail, validateName } from '../utils/validators';
@@ -22,11 +23,10 @@ import { logger } from '../utils/logger';
 
 export interface CreateMeetingInput {
   title: string;
+  hostName?: string;
   hostEmail?: string;
-  guestAName?: string;
-  guestAEmail?: string;
-  guestBName?: string;
-  guestBEmail?: string;
+  guestName?: string;
+  guestEmail?: string;
   scheduledTime?: string;
 }
 
@@ -35,32 +35,32 @@ export async function createMeeting(input: CreateMeetingInput): Promise<Meeting>
     throw new ValidationError('Title is required and must be under 255 characters');
   }
 
+  if (input.hostName !== undefined && !validateName(input.hostName)) {
+    throw new ValidationError('Host name too long');
+  }
   if (input.hostEmail && !validateEmail(input.hostEmail)) {
     throw new ValidationError('Invalid host email');
   }
-  if (input.guestAEmail && !validateEmail(input.guestAEmail)) {
-    throw new ValidationError('Invalid guest A email');
+  if (input.guestName !== undefined && !validateName(input.guestName)) {
+    throw new ValidationError('Guest name too long');
   }
-  if (input.guestBEmail && !validateEmail(input.guestBEmail)) {
-    throw new ValidationError('Invalid guest B email');
+  if (input.guestEmail && !validateEmail(input.guestEmail)) {
+    throw new ValidationError('Invalid guest email');
   }
-  if (input.guestAName !== undefined && !validateName(input.guestAName)) {
-    throw new ValidationError('Guest A name too long');
-  }
-  if (input.guestBName !== undefined && !validateName(input.guestBName)) {
-    throw new ValidationError('Guest B name too long');
+  if (input.hostEmail && input.guestEmail &&
+      input.hostEmail.toLowerCase() === input.guestEmail.toLowerCase()) {
+    throw new ConflictError('Host and guest cannot use the same email');
   }
 
   const meeting: Meeting = {
     meetingId: uuid(),
     title: input.title.trim(),
+    hostName: input.hostName || null,
     hostEmail: input.hostEmail || null,
-    guestAName: input.guestAName || null,
-    guestAEmail: input.guestAEmail || null,
-    guestBName: input.guestBName || null,
-    guestBEmail: input.guestBEmail || null,
+    guestName: input.guestName || null,
+    guestEmail: input.guestEmail || null,
     scheduledTime: input.scheduledTime || null,
-    status: 'scheduled',
+    status: MEETING_STATUS.SCHEDULED,
     createdAt: new Date().toISOString(),
   };
 
@@ -83,9 +83,17 @@ export async function updateStatus(meetingId: string, status: MeetingStatus): Pr
   await meetingRepo.updateMeetingStatus(meetingId, status);
 }
 
-export async function assignHost(meetingId: string, email: string): Promise<boolean> {
+export async function assignHost(meetingId: string, email: string, name?: string): Promise<boolean> {
   if (!validateEmail(email)) throw new ValidationError('Invalid email');
-  const assigned = await meetingRepo.assignHostEmail(meetingId, email);
+  if (name !== undefined && !validateName(name)) throw new ValidationError('Host name too long');
+
+  // Prevent same email from being both host and guest
+  const meeting = await getMeeting(meetingId);
+  if (meeting.guestEmail && meeting.guestEmail.toLowerCase() === email.toLowerCase()) {
+    throw new ConflictError('This email is already assigned as guest for this meeting');
+  }
+
+  const assigned = await meetingRepo.assignHostEmail(meetingId, email, name);
   if (!assigned) {
     logger.warn('Host email already assigned', { meetingId, email });
   }
@@ -94,16 +102,21 @@ export async function assignHost(meetingId: string, email: string): Promise<bool
 
 export async function assignGuest(
   meetingId: string,
-  slot: 'A' | 'B',
   email: string,
   name: string,
 ): Promise<boolean> {
   if (!validateEmail(email)) throw new ValidationError('Invalid email');
   if (!validateName(name)) throw new ValidationError('Name too long');
 
-  const assigned = await meetingRepo.assignGuestEmail(meetingId, slot, email, name);
+  // Prevent same email from being both host and guest
+  const meeting = await getMeeting(meetingId);
+  if (meeting.hostEmail && meeting.hostEmail.toLowerCase() === email.toLowerCase()) {
+    throw new ConflictError('This email is already assigned as host for this meeting');
+  }
+
+  const assigned = await meetingRepo.assignGuestEmail(meetingId, email, name);
   if (!assigned) {
-    throw new ConflictError(`Guest ${slot} already assigned for meeting ${meetingId}`);
+    throw new ConflictError(`Guest already assigned for meeting ${meetingId}`);
   }
   return assigned;
 }
@@ -127,13 +140,12 @@ export async function getOrCreateMeeting(meetingId: string, title?: string): Pro
   const meeting: Meeting = {
     meetingId,
     title: title || `Meeting ${meetingId.slice(0, 8)}`,
+    hostName: null,
     hostEmail: null,
-    guestAName: null,
-    guestAEmail: null,
-    guestBName: null,
-    guestBEmail: null,
+    guestName: null,
+    guestEmail: null,
     scheduledTime: null,
-    status: 'active',
+    status: MEETING_STATUS.ACTIVE,
     createdAt: new Date().toISOString(),
   };
 

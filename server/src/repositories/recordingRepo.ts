@@ -21,6 +21,7 @@
 import { PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { docClient, TABLES } from '../infra/dynamodb';
 import type { Recording } from '../shared';
+import { RECORDING_STATUS } from '../shared';
 import { logger } from '../utils/logger';
 
 /** Create a new recording entry (initially with status 'uploading') */
@@ -108,7 +109,7 @@ export async function getCompletedRecordingsForSession(
   sessionId: string,
 ): Promise<Recording[]> {
   const recordings = await getRecordingsBySession(meetingId, sessionId);
-  return recordings.filter((r) => r.status === 'completed');
+  return recordings.filter((r) => r.status === RECORDING_STATUS.COMPLETED);
 }
 
 /**
@@ -121,7 +122,7 @@ export async function areAllParticipantRecordingsComplete(
   sessionId: string,
 ): Promise<{ complete: boolean; recordings: Recording[] }> {
   const recordings = await getRecordingsBySession(meetingId, sessionId);
-  const completed = recordings.filter((r) => r.status === 'completed');
+  const completed = recordings.filter((r) => r.status === RECORDING_STATUS.COMPLETED);
   // We expect 2 recordings (host + guest) for a complete session
   return { complete: completed.length >= 2, recordings: completed };
 }

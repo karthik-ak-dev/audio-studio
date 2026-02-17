@@ -17,7 +17,7 @@
  * One RoomMetricsAggregate exists per active recording session, keyed by
  * `{roomId}:{sessionId}`. It's cleaned up when the session ends.
  */
-import { AUDIO_THRESHOLDS } from '../shared';
+import { AUDIO_THRESHOLDS, WARNING_TYPE, SEVERITY, QUALITY_PROFILE } from '../shared';
 import type {
   AudioMetricsBatch,
   SpeakerMetricsAggregate,
@@ -38,7 +38,7 @@ export function getOrCreateRoom(roomId: string, sessionId: string): RoomMetricsA
       sessionId,
       speakers: {},
       overlapPercent: 0,
-      estimatedProfile: 'P0',
+      estimatedProfile: QUALITY_PROFILE.P0,
       startedAt: Date.now(),
     };
     roomMetrics.set(key, room);
@@ -94,40 +94,40 @@ export function ingestMetrics(
   // Clipping warning
   if (batch.clipCount >= AUDIO_THRESHOLDS.CLIP_WARNING_COUNT) {
     warnings.push({
-      type: 'clipping',
+      type: WARNING_TYPE.CLIPPING,
       speaker,
       message: `${speaker} audio is clipping (${batch.clipCount} clips detected)`,
-      severity: batch.clipCount >= AUDIO_THRESHOLDS.CLIP_WARNING_COUNT * 2 ? 'critical' : 'warning',
+      severity: batch.clipCount >= AUDIO_THRESHOLDS.CLIP_WARNING_COUNT * 2 ? SEVERITY.CRITICAL : SEVERITY.WARNING,
     });
   }
 
   // Too loud
   if (batch.rms > AUDIO_THRESHOLDS.MIC_TOO_LOUD) {
     warnings.push({
-      type: 'too-loud',
+      type: WARNING_TYPE.TOO_LOUD,
       speaker,
       message: `${speaker} volume is too high (${batch.rms.toFixed(1)} dBFS)`,
-      severity: 'warning',
+      severity: SEVERITY.WARNING,
     });
   }
 
   // Too quiet
   if (batch.rms < AUDIO_THRESHOLDS.MIC_TOO_QUIET && batch.speechDetected) {
     warnings.push({
-      type: 'too-quiet',
+      type: WARNING_TYPE.TOO_QUIET,
       speaker,
       message: `${speaker} volume is very low (${batch.rms.toFixed(1)} dBFS)`,
-      severity: 'warning',
+      severity: SEVERITY.WARNING,
     });
   }
 
   // Long silence
   if (agg.totalSilenceMs >= AUDIO_THRESHOLDS.SILENCE_WARNING_MS) {
     warnings.push({
-      type: 'long-silence',
+      type: WARNING_TYPE.LONG_SILENCE,
       speaker,
       message: `${speaker} has been silent for ${Math.floor(agg.totalSilenceMs / 1000)}s`,
-      severity: agg.totalSilenceMs >= AUDIO_THRESHOLDS.SILENCE_WARNING_MS * 2 ? 'critical' : 'warning',
+      severity: agg.totalSilenceMs >= AUDIO_THRESHOLDS.SILENCE_WARNING_MS * 2 ? SEVERITY.CRITICAL : SEVERITY.WARNING,
     });
   }
 
@@ -143,10 +143,10 @@ export function ingestMetrics(
 
     if (overlap > AUDIO_THRESHOLDS.OVERLAP_WARNING_PCT) {
       warnings.push({
-        type: 'overlap',
+        type: WARNING_TYPE.OVERLAP,
         speaker: 'both',
         message: `Speakers are overlapping ${overlap.toFixed(0)}% of the time`,
-        severity: 'warning',
+        severity: SEVERITY.WARNING,
       });
     }
   }
@@ -182,7 +182,7 @@ export function getQualityUpdate(roomId: string, sessionId: string) {
  */
 function estimateProfile(room: RoomMetricsAggregate): QualityProfile {
   const speakers = Object.values(room.speakers);
-  if (speakers.length === 0) return 'P0';
+  if (speakers.length === 0) return QUALITY_PROFILE.P0;
 
   const avgRms = speakers.reduce((sum, s) => sum + s.avgRms, 0) / speakers.length;
   const totalClips = speakers.reduce((sum, s) => sum + s.totalClips, 0);
@@ -196,11 +196,11 @@ function estimateProfile(room: RoomMetricsAggregate): QualityProfile {
     room.overlapPercent < 5 &&
     maxSilence < AUDIO_THRESHOLDS.SILENCE_WARNING_MS
   ) {
-    return 'P0';
+    return QUALITY_PROFILE.P0;
   }
 
-  if (totalClips <= 5 && room.overlapPercent < 10) return 'P1';
-  if (totalClips <= 20 && room.overlapPercent < 20) return 'P2';
-  if (totalClips <= 50) return 'P3';
-  return 'P4';
+  if (totalClips <= 5 && room.overlapPercent < 10) return QUALITY_PROFILE.P1;
+  if (totalClips <= 20 && room.overlapPercent < 20) return QUALITY_PROFILE.P2;
+  if (totalClips <= 50) return QUALITY_PROFILE.P3;
+  return QUALITY_PROFILE.P4;
 }

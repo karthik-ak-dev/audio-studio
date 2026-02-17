@@ -137,6 +137,47 @@ export async function markSessionInactiveBySocketId(socketId: string): Promise<S
   return session;
 }
 
+/** Find ALL active sessions for a user (via UserIndex GSI) — used to clean up stale sessions */
+export async function findAllActiveByUserId(userId: string): Promise<Session[]> {
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: TABLES.SESSIONS,
+      IndexName: 'UserIndex',
+      KeyConditionExpression: 'userId = :uid',
+      FilterExpression: 'isActive = :active',
+      ExpressionAttributeValues: { ':uid': userId, ':active': true },
+    }),
+  );
+  return (result.Items as Session[]) ?? [];
+}
+
+/**
+ * Find recent sessions for a user — both active AND recently deactivated.
+ * Used to detect reconnections even when the disconnect handler fired before
+ * the new join-room arrives (page refresh race condition).
+ * A session deactivated within `withinMs` is still considered a reconnection candidate.
+ */
+export async function findRecentByUserId(userId: string, withinMs: number = 10_000): Promise<Session[]> {
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: TABLES.SESSIONS,
+      IndexName: 'UserIndex',
+      KeyConditionExpression: 'userId = :uid',
+      ExpressionAttributeValues: { ':uid': userId },
+    }),
+  );
+  const all = (result.Items as Session[]) ?? [];
+  const cutoff = Date.now() - withinMs;
+  return all.filter((s) => {
+    if (s.isActive) return true;
+    // Include recently deactivated sessions (within the reconnection window)
+    if (s.leftAt) {
+      return new Date(s.leftAt).getTime() > cutoff;
+    }
+    return false;
+  });
+}
+
 /** Count active sessions for a meeting — used to enforce the 2-participant room limit */
 export async function getActiveSessionCount(meetingId: string): Promise<number> {
   const result = await docClient.send(

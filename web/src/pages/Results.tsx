@@ -45,7 +45,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import type { ProcessingCompletePayload, Recording } from '../shared';
-import { SOCKET_EVENTS } from '../shared';
+import { SOCKET_EVENTS, ROLES, RECORDING_STATUS } from '../shared';
 import QualityBadge from '@/components/QualityBadge';
 import { connectSocket, disconnectSocket } from '@/services/socketService';
 
@@ -112,7 +112,7 @@ export default function Results() {
     // Join the room so we receive events targeted at this room
     socket.emit(SOCKET_EVENTS.JOIN_ROOM, {
       roomId,
-      role: 'host',
+      role: ROLES.HOST,
       userId: userId.current,
     });
 
@@ -258,7 +258,7 @@ export default function Results() {
                     </div>
                   </div>
                   {/* Download button — only shown for completed uploads */}
-                  {rec.status === 'completed' && (
+                  {rec.status === RECORDING_STATUS.COMPLETED && (
                     <button
                       onClick={() => handleDownload(rec)}
                       className="px-3 py-1.5 bg-accent-400 hover:bg-accent-500 text-surface-950 text-sm font-semibold rounded-lg transition-colors"
