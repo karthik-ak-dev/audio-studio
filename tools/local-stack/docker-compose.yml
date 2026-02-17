@@ -83,7 +83,7 @@ services:
       dockerfile: infra/docker/Dockerfile.web
       args:
         - NGINX_CONF=infra/docker/nginx.docker.conf
-        - VITE_SKIP_GREEN_ROOM=false
+        - VITE_SKIP_GREEN_ROOM=true
     ports:
       - "8080:80"
     depends_on:

@@ -147,8 +147,33 @@ export function useSocket(
     socket.on(SOCKET_EVENTS.ERROR, (data: ErrorPayload) => setError(data.message));
 
     // Session lifecycle events — all go through callbacksRef for latest closure
-    socket.on(SOCKET_EVENTS.USER_JOINED, (data: UserJoinedPayload) => callbacksRef.current?.onUserJoined?.(data));
-    socket.on(SOCKET_EVENTS.USER_LEFT, (data: UserLeftPayload) => callbacksRef.current?.onUserLeft?.(data));
+    socket.on(SOCKET_EVENTS.USER_JOINED, (data: UserJoinedPayload) => {
+      // Add the new participant to roomState so the UI updates immediately
+      setRoomState((prev) => {
+        if (!prev) return prev;
+        const already = prev.participants.some((p) => p.userId === data.persistentId);
+        if (already) return prev;
+        return {
+          ...prev,
+          participants: [
+            ...prev.participants,
+            { socketId: data.userId, userId: data.persistentId, role: data.role, userEmail: data.userEmail },
+          ],
+        };
+      });
+      callbacksRef.current?.onUserJoined?.(data);
+    });
+    socket.on(SOCKET_EVENTS.USER_LEFT, (data: UserLeftPayload) => {
+      // Remove the participant from roomState
+      setRoomState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          participants: prev.participants.filter((p) => p.userId !== data.persistentId),
+        };
+      });
+      callbacksRef.current?.onUserLeft?.(data);
+    });
     socket.on(SOCKET_EVENTS.PEER_RECONNECTED, (data: PeerReconnectedPayload) => callbacksRef.current?.onPeerReconnected?.(data));
     socket.on(SOCKET_EVENTS.ROOM_FULL, () => {
       // Disable auto-reconnection BEFORE the server force-disconnects us.

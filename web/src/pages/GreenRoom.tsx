@@ -68,8 +68,8 @@ export default function GreenRoom() {
   // ── Identity gate ─────────────────────────────────────────
   // Redirect to Home if user hasn't entered name/email yet.
   // This covers the case where a guest clicks an invite link directly.
+  // Runs even when DEV_SKIP is on — identity is always required.
   useEffect(() => {
-    if (DEV_SKIP) return;
     const hasIdentity = localStorage.getItem('userName') && localStorage.getItem('userEmail');
     if (!hasIdentity && roomId) {
       navigate(`/?room=${roomId}`, { replace: true });
@@ -320,7 +320,7 @@ export default function GreenRoom() {
           </p>
         </div>
 
-        <div className="p-6 bg-surface-900 border border-surface-700 rounded-xl">
+        <div className="p-6 border bg-surface-900 border-surface-700 rounded-xl">
           {/* Step 1: Microphone */}
           <StepItem
             stepNumber={1}
@@ -524,7 +524,7 @@ function StepItem({
       </div>
 
       {/* Label row */}
-      <div className="flex items-center gap-2 h-8">
+      <div className="flex items-center h-8 gap-2">
         <span
           className={`font-medium ${
             status === 'pending' ? 'text-surface-500' : 'text-surface-50'
