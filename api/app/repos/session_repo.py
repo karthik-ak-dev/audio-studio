@@ -13,7 +13,10 @@ from app.utils.time import now_iso, compute_ttl
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-dynamodb = boto3.resource("dynamodb")
+dynamodb = boto3.resource(
+    "dynamodb",
+    **({"endpoint_url": settings.dynamodb_endpoint} if settings.dynamodb_endpoint else {}),
+)
 table: Table = dynamodb.Table(settings.sessions_table)
 
 

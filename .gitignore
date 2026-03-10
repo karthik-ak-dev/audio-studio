@@ -9,10 +9,26 @@ __pycache__/
 dist/
 build/
 
+# Node
+node_modules/
+web/node_modules/
+
+# Vite
+web/dist/
+
 # IDE
 .idea/
 .vscode/
 *.swp
 
-# Environment
+# Environment / secrets
 .env
+.env.*
+infrastructure/env.local.json
+
+# SAM
+.aws-sam/
+
+# OS
+.DS_Store
+Thumbs.db
