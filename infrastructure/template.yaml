@@ -34,6 +34,12 @@ Parameters:
     Default: "http://localhost:5173"
     Description: Allowed CORS origin for the frontend
 
+  MergeDuration:
+    Type: String
+    Default: "longest"
+    AllowedValues: ["longest", "shortest", "first"]
+    Description: "Merge duration strategy — longest (pad silence), shortest (truncate), first (match first input)"
+
 # ──────────────────────────────────────────────
 # Globals
 # ──────────────────────────────────────────────
@@ -211,6 +217,7 @@ Resources:
           SESSIONS_TABLE: !Ref SessionsTable
           DAILY_DOMAIN: !Ref DailyDomain
           PROCESSED_PREFIX: "processed/"
+          MERGE_DURATION: !Ref MergeDuration
       Events:
         RawTrackUploaded:
           Type: S3

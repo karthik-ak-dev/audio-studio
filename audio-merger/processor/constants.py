@@ -13,5 +13,9 @@ FFMPEG_PATH: str = "/opt/bin/ffmpeg"
 FFMPEG_TIMEOUT_SEC: int = 600
 EXPECTED_TRACKS_PER_SESSION: int = 2
 
+# Merge duration strategy (longest | shortest | first)
+VALID_MERGE_DURATIONS: set[str] = {"longest", "shortest", "first"}
+DEFAULT_MERGE_DURATION: str = "longest"
+
 # Daily.co file naming
 AUDIO_TRACK_IDENTIFIER: str = "cam-audio"

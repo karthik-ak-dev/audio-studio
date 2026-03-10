@@ -8,6 +8,7 @@ class ProcessorConfig:
     SESSIONS_TABLE: str = os.environ.get("SESSIONS_TABLE", "")
     DAILY_DOMAIN: str = os.environ.get("DAILY_DOMAIN", "")
     PROCESSED_PREFIX: str = os.environ.get("PROCESSED_PREFIX", "processed/")
+    MERGE_DURATION: str = os.environ.get("MERGE_DURATION", "longest")
     ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "dev")
 
 
