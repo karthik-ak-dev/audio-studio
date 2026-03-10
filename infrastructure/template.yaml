@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Audio Recording Platform — Unified Infrastructure
+  S3, IAM, DynamoDB, API Gateway, API Lambda, Audio Merger Lambda
+
+# ──────────────────────────────────────────────
+# Parameters
+# ──────────────────────────────────────────────
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, stage, prod]
+    Description: Deployment environment
+
+  DailyApiKey:
+    Type: String
+    NoEcho: true
+    Description: Daily.co API key
+
+  DailyWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: Daily.co webhook HMAC secret
+
+  DailyDomain:
+    Type: String
+    Description: "Daily.co domain name (e.g. ak-kgen)"
+
+  FrontendOrigin:
+    Type: String
+    Default: "http://localhost:5173"
+    Description: Allowed CORS origin for the frontend
+
+# ──────────────────────────────────────────────
+# Globals
+# ──────────────────────────────────────────────
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+
+# ──────────────────────────────────────────────
+# Resources
+# ──────────────────────────────────────────────
+Resources:
+
+  # ─── S3: Recording Storage ───────────────────
+  RecordingsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "audio-recordings-${Environment}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteRawRecordingsAfter30Days
+            Prefix: !Sub "${DailyDomain}/"
+            Status: Enabled
+            ExpirationInDays: 180
+          - Id: MoveProcessedToInfrequentAccess
+            Prefix: "processed/"
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 60
+
+  # ─── IAM: Daily.co Cross-Account Role ────────
+  DailyRecordingsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "DailyRecordingsRole-${Environment}"
+      MaxSessionDuration: 43200
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::291871421005:root"
+            Action: "sts:AssumeRole"
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref DailyDomain
+      Policies:
+        - PolicyName: DailyS3WritePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:DeleteObject"
+                  - "s3:ListBucket"
+                Resource:
+                  - !GetAtt RecordingsBucket.Arn
+                  - !Sub "${RecordingsBucket.Arn}/*"
+
+  # ─── DynamoDB: Sessions Table ────────────────
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "audio-sessions-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: host_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: HostUserIndex
+          KeySchema:
+            - AttributeName: host_user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ─── API Gateway: HTTP API ───────────────────
+  AudioApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref FrontendOrigin
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        AllowHeaders: [Content-Type, Authorization, X-Api-Key]
+        MaxAge: 3600
+
+  # ─── Lambda: API (FastAPI + Mangum) ──────────
+  ApiFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "audio-api-${Environment}"
+      Handler: app.handler.handler
+      CodeUri: ../api/
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          SESSIONS_TABLE: !Ref SessionsTable
+          RECORDINGS_BUCKET: !Ref RecordingsBucket
+          DAILY_API_KEY: !Ref DailyApiKey
+          DAILY_WEBHOOK_SECRET: !Ref DailyWebhookSecret
+          DAILY_DOMAIN: !Ref DailyDomain
+      Events:
+        CatchAll:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AudioApi
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
+
+  # ─── Lambda Layer: ffmpeg ──────────────────────
+  FfmpegLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "ffmpeg-${Environment}"
+      Description: Static ffmpeg binary for arm64 Lambda
+      ContentUri: ../audio-merger/layers/ffmpeg/
+      CompatibleRuntimes:
+        - python3.12
+      CompatibleArchitectures:
+        - arm64
+      RetentionPolicy: Retain
+
+  # ─── Lambda: Audio Merger (ffmpeg) ───────────
+  AudioMergerFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "audio-merger-${Environment}"
+      Handler: processor.handler.handler
+      CodeUri: ../audio-merger/
+      Timeout: 900
+      MemorySize: 1024
+      EphemeralStorage:
+        Size: 2048
+      Layers:
+        - !Ref FfmpegLayer
+      Environment:
+        Variables:
+          RECORDINGS_BUCKET: !Ref RecordingsBucket
+          SESSIONS_TABLE: !Ref SessionsTable
+          DAILY_DOMAIN: !Ref DailyDomain
+          PROCESSED_PREFIX: "processed/"
+      Events:
+        RawTrackUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref RecordingsBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: !Sub "${DailyDomain}/"
+                  - Name: suffix
+                    Value: "audio"
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref RecordingsBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
+
+# ──────────────────────────────────────────────
+# Outputs
+# ──────────────────────────────────────────────
+Outputs:
+
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${AudioApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+
+  RecordingsBucketName:
+    Description: S3 bucket for raw and processed recordings
+    Value: !Ref RecordingsBucket
+
+  RecordingsBucketArn:
+    Description: S3 bucket ARN
+    Value: !GetAtt RecordingsBucket.Arn
+
+  DailyRecordingsRoleArn:
+    Description: IAM role ARN — configure this in Daily.co domain settings
+    Value: !GetAtt DailyRecordingsRole.Arn
+
+  SessionsTableName:
+    Description: DynamoDB sessions table name
+    Value: !Ref SessionsTable
+
+  ApiFunctionArn:
+    Description: API Lambda function ARN
+    Value: !GetAtt ApiFn.Arn
+
+  AudioMergerFunctionArn:
+    Description: Audio Merger Lambda function ARN
+    Value: !GetAtt AudioMergerFn.Arn

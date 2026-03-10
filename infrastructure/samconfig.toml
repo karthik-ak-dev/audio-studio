@@ -1,0 +1,49 @@
+# SAM CLI deploy configuration
+# Usage: cd infrastructure && sam deploy
+
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "audio-recording-platform-dev"
+region = "ap-south-1"
+resolve_s3 = true
+capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+
+parameter_overrides = [
+  "Environment=dev",
+  "DailyDomain=ak-kgen",
+  "FrontendOrigin=http://localhost:5173",
+]
+
+# Secrets — pass these at deploy time:
+#   sam deploy --parameter-overrides \
+#     DailyApiKey=xxx \
+#     DailyWebhookSecret=xxx
+
+[default.build.parameters]
+use_container = false
+
+[stage.deploy.parameters]
+stack_name = "audio-recording-platform-stage"
+region = "ap-south-1"
+resolve_s3 = true
+capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+
+parameter_overrides = [
+  "Environment=stage",
+  "DailyDomain=ak-kgen",
+]
+
+[prod.deploy.parameters]
+stack_name = "audio-recording-platform-prod"
+region = "ap-south-1"
+resolve_s3 = true
+capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+
+parameter_overrides = [
+  "Environment=prod",
+  "DailyDomain=ak-kgen",
+]
