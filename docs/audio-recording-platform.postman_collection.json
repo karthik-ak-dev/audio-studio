@@ -1,0 +1,255 @@
+{
+  "info": {
+    "name": "Audio Recording Platform",
+    "description": "API collection for the Audio Recording Platform.\n\nSet the `base_url` variable to your API Gateway URL or http://localhost:8000 for local dev.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "Create Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.collectionVariables.set('session_id', json.session_id);",
+                  "    console.log('session_id saved:', json.session_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"host_user_id\": \"user-001\",\n  \"host_name\": \"Alice\",\n  \"guest_name\": \"Bob\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/sessions/",
+              "host": ["{{base_url}}"],
+              "path": ["sessions", ""]
+            }
+          }
+        },
+        {
+          "name": "Get Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["sessions", "{{session_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Stop Session",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/stop",
+              "host": ["{{base_url}}"],
+              "path": ["sessions", "{{session_id}}", "stop"]
+            }
+          }
+        },
+        {
+          "name": "Pause Session",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/pause",
+              "host": ["{{base_url}}"],
+              "path": ["sessions", "{{session_id}}", "pause"]
+            }
+          }
+        },
+        {
+          "name": "Resume Session",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sessions/{{session_id}}/resume",
+              "host": ["{{base_url}}"],
+              "path": ["sessions", "{{session_id}}", "resume"]
+            }
+          }
+        },
+        {
+          "name": "List Sessions by Host",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sessions/user/user-001?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["sessions", "user", "user-001"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "participant.joined",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"participant.joined\",\n  \"payload\": {\n    \"room\": \"session-{{session_id}}\",\n    \"participant_id\": \"p1-uuid\",\n    \"user_name\": \"Alice\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhooks/daily",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "daily"]
+            }
+          }
+        },
+        {
+          "name": "participant.left",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"participant.left\",\n  \"payload\": {\n    \"room\": \"session-{{session_id}}\",\n    \"participant_id\": \"p1-uuid\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhooks/daily",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "daily"]
+            }
+          }
+        },
+        {
+          "name": "recording.started",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"recording.started\",\n  \"payload\": {\n    \"room\": \"session-{{session_id}}\",\n    \"recording_id\": \"rec-123\",\n    \"start_ts\": 1710072000.0\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhooks/daily",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "daily"]
+            }
+          }
+        },
+        {
+          "name": "recording.stopped",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"recording.stopped\",\n  \"payload\": {\n    \"room\": \"session-{{session_id}}\",\n    \"timestamp\": \"2026-03-10T12:00:00Z\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhooks/daily",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "daily"]
+            }
+          }
+        },
+        {
+          "name": "recording.error",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"recording.error\",\n  \"payload\": {\n    \"room\": \"session-{{session_id}}\",\n    \"error\": \"Recording failed: storage error\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhooks/daily",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "daily"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
