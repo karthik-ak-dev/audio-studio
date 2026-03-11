@@ -58,7 +58,6 @@ export function AudioRoom() {
     async (result: ActionResult): Promise<boolean> => {
       if (!sessionId) return false;
       if (result === "stale") {
-        // 400 = state diverged. Silently re-poll to sync UI, no error shown.
         const session = await pollSession(sessionId);
         if (session) {
           dispatch({ type: "SESSION_SYNCED", payload: { session } });
@@ -98,7 +97,6 @@ export function AudioRoom() {
 
   const handleDailyError = useCallback(
     (error: string) => {
-      // Show inline error — don't navigate away, session state remains visible
       setSdkError(error);
     },
     [],
@@ -248,24 +246,42 @@ export function AudioRoom() {
 
   // ─── 5. Sync timer with server recording state ───
   useEffect(() => {
-    if (sessionState.status === "recording" && sessionState.recordingStartedAt) {
-      timer.syncWithServer(sessionState.recordingStartedAt);
-      if (!timer.isRunning) timer.start();
-    } else if (sessionState.status === "paused") {
-      timer.stop();
-    } else if (sessionState.status === "ready" || sessionState.status === "created" || sessionState.status === "waiting_for_guest") {
+    if (
+      (sessionState.status === "recording" || sessionState.status === "paused") &&
+      sessionState.recordingStartedAt
+    ) {
+      timer.sync(
+        sessionState.recordingStartedAt,
+        sessionState.pauseEvents,
+        sessionState.status === "recording",
+      );
+    } else if (
+      sessionState.status === "ready" ||
+      sessionState.status === "created" ||
+      sessionState.status === "waiting_for_guest"
+    ) {
       timer.reset();
     }
-  }, [sessionState.status, sessionState.recordingStartedAt, timer]);
+  }, [sessionState.status, sessionState.recordingStartedAt, sessionState.pauseEvents, timer.sync, timer.reset]);
 
   // ─── 6. Auto-mute on pause, auto-unmute on resume ───
   const prevStatusRef = useRef<string | null>(null);
+  const muteSyncedRef = useRef(false);
   useEffect(() => {
     const prev = prevStatusRef.current;
     const curr = sessionState.status;
     prevStatusRef.current = curr;
 
-    if (!daily.isJoined || prev === null) return;
+    if (!daily.isJoined || curr === null) return;
+
+    // First time we have both isJoined=true AND a known status — sync mute
+    if (!muteSyncedRef.current) {
+      muteSyncedRef.current = true;
+      if (curr === "paused") {
+        daily.setMuted(true);
+      }
+      return;
+    }
 
     // Transition: recording → paused — auto-mute
     if (prev === "recording" && curr === "paused") {
@@ -320,12 +336,15 @@ export function AudioRoom() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // ─── Derived state from server ───
+  // ─── Derived state ───
   const isRecording = sessionState.status === "recording";
   const isPaused = sessionState.status === "paused";
   const canStartRecording = sessionState.status === "ready" && sessionState.participantCount >= 2;
   const canResume = isPaused && sessionState.participantCount >= 2;
   const showConnectionWarning = pollFailCount >= POLL_FAIL_THRESHOLD;
+
+  // The room is "ready" when server state is synced and Daily SDK is connected
+  const isRoomReady = daily.isJoined && sessionState.status !== null;
 
   // Find disconnected participant name for the banner
   const disconnectedName = (() => {
@@ -356,7 +375,7 @@ export function AudioRoom() {
   return (
     <PageContainer>
       <div className="animate-slide-up">
-        {/* SDK error banner with reconnect — inline, doesn't replace page */}
+        {/* SDK error banner with reconnect */}
         {sdkError && (
           <div className="mb-5 flex items-center justify-between gap-3 rounded-lg bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
             <div className="flex items-center gap-3">
@@ -407,42 +426,46 @@ export function AudioRoom() {
                 <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-red-500/30 animate-pulse" />
               )}
 
-              <div className="flex flex-col items-center gap-8 py-8 md:py-12">
-                {/* Status bar */}
-                <div className="flex w-full items-center justify-between px-2">
-                  <ConnectionStatus quality={daily.networkQuality} />
-                  <MicLevelMeter level={daily.micLevel} isMuted={daily.isMuted} />
+              {isRoomReady ? (
+                <div className="flex flex-col items-center gap-8 py-8 md:py-12">
+                  {/* Status bar */}
+                  <div className="flex w-full items-center justify-between px-2">
+                    <ConnectionStatus quality={daily.networkQuality} />
+                    <MicLevelMeter level={daily.micLevel} isMuted={daily.isMuted} />
+                  </div>
+
+                  {/* Timer */}
+                  <Timer
+                    formatted={timer.formatted}
+                    progress={timer.progress}
+                    isRecording={isRecording}
+                    isPaused={isPaused}
+                  />
+
+                  {/* Mute button */}
+                  <MuteButton
+                    isMuted={daily.isMuted}
+                    onToggle={daily.toggleMute}
+                    disabled={!daily.isJoined || isPaused}
+                  />
+
+                  {/* Recording controls */}
+                  <RecordingControls
+                    status={sessionState.status}
+                    isHost={isHost}
+                    canStartRecording={canStartRecording}
+                    canResume={canResume}
+                    loading={apiLoading}
+                    onStart={handleStart}
+                    onEnd={handleEnd}
+                    onPause={handlePause}
+                    onResume={handleResume}
+                    onLeave={handleLeave}
+                  />
                 </div>
-
-                {/* Timer */}
-                <Timer
-                  formatted={timer.formatted}
-                  progress={timer.progress}
-                  isRecording={isRecording}
-                  isPaused={isPaused}
-                />
-
-                {/* Mute button */}
-                <MuteButton
-                  isMuted={daily.isMuted}
-                  onToggle={daily.toggleMute}
-                  disabled={!daily.isJoined || isPaused}
-                />
-
-                {/* Recording controls */}
-                <RecordingControls
-                  status={sessionState.status}
-                  isHost={isHost}
-                  canStartRecording={canStartRecording}
-                  canResume={canResume}
-                  loading={apiLoading}
-                  onStart={handleStart}
-                  onEnd={handleEnd}
-                  onPause={handlePause}
-                  onResume={handleResume}
-                  onLeave={handleLeave}
-                />
-              </div>
+              ) : (
+                <RecordingCardSkeleton />
+              )}
             </Card>
           </div>
 
@@ -498,52 +521,110 @@ export function AudioRoom() {
               </Card>
             )}
 
-            {/* Participants — server-driven roster */}
-            <Card>
-              <ParticipantStatus
-                participantsRoster={sessionState.participantsRoster}
-                activeParticipants={sessionState.activeParticipants}
-                sdkParticipants={daily.participants}
-                localUserId={daily.localUserId}
-              />
-            </Card>
-
-            {/* Session info */}
-            <Card>
-              <div className="flex flex-col gap-3">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                  Session Info
-                </span>
-                <div className="space-y-2">
-                  <InfoRow label="Session ID" value={sessionId ?? ""} mono />
-                  {sessionState.hostName && (
-                    <InfoRow label="Host" value={sessionState.hostName} />
-                  )}
-                  {sessionState.guestName && (
-                    <InfoRow label="Guest" value={sessionState.guestName} />
-                  )}
-                  <InfoRow
-                    label="Status"
-                    value={
-                      isRecording
-                        ? "Recording"
-                        : isPaused
-                          ? "Paused"
-                          : daily.isJoined
-                            ? "Connected"
-                            : "Connecting..."
-                    }
+            {isRoomReady ? (
+              <>
+                {/* Participants — server-driven roster */}
+                <Card>
+                  <ParticipantStatus
+                    participantsRoster={sessionState.participantsRoster}
+                    activeParticipants={sessionState.activeParticipants}
+                    sdkParticipants={daily.participants}
+                    localUserId={daily.localUserId}
                   />
-                  {sessionState.pauseEvents.length > 0 && (
-                    <InfoRow label="Pauses" value={String(sessionState.pauseEvents.length)} />
-                  )}
-                </div>
-              </div>
-            </Card>
+                </Card>
+
+                {/* Session info */}
+                <Card>
+                  <div className="flex flex-col gap-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                      Session Info
+                    </span>
+                    <div className="space-y-2">
+                      <InfoRow label="Session ID" value={sessionId ?? ""} mono />
+                      {sessionState.hostName && (
+                        <InfoRow label="Host" value={sessionState.hostName} />
+                      )}
+                      {sessionState.guestName && (
+                        <InfoRow label="Guest" value={sessionState.guestName} />
+                      )}
+                      <InfoRow
+                        label="Status"
+                        value={
+                          isRecording
+                            ? "Recording"
+                            : isPaused
+                              ? "Paused"
+                              : "Connected"
+                        }
+                      />
+                      {sessionState.pauseEvents.length > 0 && (
+                        <InfoRow label="Pauses" value={String(sessionState.pauseEvents.length)} />
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              </>
+            ) : (
+              <>
+                <SidebarCardSkeleton lines={2} />
+                <SidebarCardSkeleton lines={4} />
+              </>
+            )}
           </div>
         </div>
       </div>
     </PageContainer>
+  );
+}
+
+// ─── Skeleton components ─────────────────────────
+
+function SkeletonBar({ className = "" }: { className?: string }) {
+  return (
+    <div className={`animate-pulse rounded bg-white/[0.06] ${className}`} />
+  );
+}
+
+function RecordingCardSkeleton() {
+  return (
+    <div className="flex flex-col items-center gap-8 py-8 md:py-12">
+      {/* Status bar placeholders */}
+      <div className="flex w-full items-center justify-between px-2">
+        <SkeletonBar className="h-7 w-24" />
+        <SkeletonBar className="h-7 w-28" />
+      </div>
+
+      {/* Timer placeholder */}
+      <div className="flex flex-col items-center gap-4">
+        <SkeletonBar className="h-4 w-20" />
+        <SkeletonBar className="h-14 w-48" />
+        <SkeletonBar className="h-1 w-[280px] max-w-full" />
+      </div>
+
+      {/* Mute button placeholder */}
+      <div className="flex flex-col items-center gap-2">
+        <div className="h-16 w-16 animate-pulse rounded-full bg-white/[0.06]" />
+        <SkeletonBar className="h-3 w-20" />
+      </div>
+
+      {/* Controls placeholder */}
+      <SkeletonBar className="h-10 w-48" />
+    </div>
+  );
+}
+
+function SidebarCardSkeleton({ lines }: { lines: number }) {
+  return (
+    <Card>
+      <div className="flex flex-col gap-3">
+        <SkeletonBar className="h-3 w-24" />
+        <div className="space-y-2">
+          {Array.from({ length: lines }, (_, i) => (
+            <SkeletonBar key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      </div>
+    </Card>
   );
 }
 
