@@ -6,6 +6,7 @@ from enum import StrEnum
 class SessionStatus(StrEnum):
     CREATED = "created"
     WAITING_FOR_GUEST = "waiting_for_guest"
+    READY = "ready"
     RECORDING = "recording"
     PAUSED = "paused"
     STOPPING = "stopping"
@@ -20,12 +21,13 @@ class SessionStatus(StrEnum):
 STATUS_PRIORITY: dict[str, int] = {
     SessionStatus.CREATED: 0,
     SessionStatus.WAITING_FOR_GUEST: 1,
-    SessionStatus.RECORDING: 2,
-    SessionStatus.PAUSED: 2,       # Same level as recording (lateral move)
-    SessionStatus.STOPPING: 3,
-    SessionStatus.PROCESSING: 4,
-    SessionStatus.COMPLETED: 5,
-    SessionStatus.ERROR: 5,        # Terminal state, same level as completed
+    SessionStatus.READY: 2,
+    SessionStatus.RECORDING: 3,
+    SessionStatus.PAUSED: 3,       # Same level as recording (lateral move)
+    SessionStatus.STOPPING: 4,
+    SessionStatus.PROCESSING: 5,
+    SessionStatus.COMPLETED: 6,
+    SessionStatus.ERROR: 6,        # Terminal state, same level as completed
 }
 
 

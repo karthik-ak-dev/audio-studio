@@ -19,8 +19,8 @@ State management strategy:
   - See _can_transition() for the guard logic.
 
 Session lifecycle:
-  created → waiting_for_guest → recording ⇄ paused → processing → completed
-                                                   ↘ error (terminal, from webhook only)
+  created → waiting_for_guest → ready → recording ⇄ paused → processing → completed
+                                                             ↘ error (terminal, from webhook only)
 """
 
 import uuid
@@ -131,20 +131,26 @@ async def join_session(session_id: str) -> SessionActionResponse:
         session_repo.update_status(session_id, SessionStatus.WAITING_FOR_GUEST)
         return SessionActionResponse(session_id=session_id, status=SessionStatus.WAITING_FOR_GUEST)
 
+    # Second participant joins → both are in the room, ready to record
+    if count >= 2 and session.status == SessionStatus.WAITING_FOR_GUEST:
+        session_repo.update_status(session_id, SessionStatus.READY)
+        return SessionActionResponse(session_id=session_id, status=SessionStatus.READY)
+
     return SessionActionResponse(session_id=session_id, status=session.status)
 
 
 async def start_recording(session_id: str) -> SessionActionResponse:
     """Host clicks "Start Recording" → calls Daily.co start_recording API.
 
-    Allowed from: created, waiting_for_guest (host can start even before guest joins).
+    Allowed from: ready (both participants in room). Also allows
+    waiting_for_guest if host wants to start before guest arrives.
     DynamoDB: status → recording, recording_segments = 1, recording_started_at set.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
         raise SessionNotFoundError(session_id)
 
-    if session.status not in (SessionStatus.CREATED, SessionStatus.WAITING_FOR_GUEST):
+    if session.status not in (SessionStatus.WAITING_FOR_GUEST, SessionStatus.READY):
         raise InvalidSessionStateError(session_id, session.status, "start recording")
 
     result: dict[str, object] = await daily_client.start_recording(session.daily_room_name)
@@ -294,23 +300,27 @@ def _can_transition(current: SessionStatus, target: SessionStatus) -> bool:
 async def on_participant_joined(session_id: str, room_name: str) -> None:
     """Webhook: participant.joined — RECONCILIATION.
 
-    Only acts if session is still in 'created' status, meaning the FE's
-    join_session() call hasn't been processed yet. If the FE already
-    moved the session forward, this is a no-op.
+    Only acts if session is still in 'created' or 'waiting_for_guest' status,
+    meaning the FE's join_session() call hasn't been processed yet. If the FE
+    already moved the session forward, this is a no-op.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
         logger.warning("Webhook: session not found: %s", session_id)
         return
 
-    if not _can_transition(session.status, SessionStatus.WAITING_FOR_GUEST):
+    if not _can_transition(session.status, SessionStatus.READY):
         logger.info("Webhook skipped: participant.joined for %s (status=%s already ahead)", session_id, session.status)
         return
 
-    if session.status == SessionStatus.CREATED:
-        session_repo.increment_participant_count(session_id, 1)
+    count: int = session_repo.increment_participant_count(session_id, 1)
+
+    if session.status == SessionStatus.CREATED and count == 1:
         session_repo.update_status(session_id, SessionStatus.WAITING_FOR_GUEST)
-        logger.info("Webhook reconciliation: participant joined %s", session_id)
+        logger.info("Webhook reconciliation: first participant joined %s", session_id)
+    elif session.status == SessionStatus.WAITING_FOR_GUEST and count >= 2:
+        session_repo.update_status(session_id, SessionStatus.READY)
+        logger.info("Webhook reconciliation: second participant joined %s → ready", session_id)
 
 
 async def on_participant_left(session_id: str, room_name: str) -> None:
