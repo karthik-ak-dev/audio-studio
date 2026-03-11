@@ -20,11 +20,21 @@ class SessionResponse(BaseModel):
     host_name: str
     guest_name: str
     daily_room_url: Optional[str] = None
+
+    # Participant tracking — derived from DynamoDB fields
     participant_count: int
+    active_participants: list[str]
+    participants: dict[str, str]
+
+    # Recording state
     recording_segments: int
     recording_started_at: Optional[str] = None
     recording_stopped_at: Optional[str] = None
+
+    # S3 data
+    s3_key: Optional[str] = None
     s3_processed_prefix: Optional[str] = None
+
     error_message: Optional[str] = None
     created_at: str
     updated_at: str

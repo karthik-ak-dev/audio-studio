@@ -9,7 +9,6 @@ class SessionStatus(StrEnum):
     READY = "ready"
     RECORDING = "recording"
     PAUSED = "paused"
-    STOPPING = "stopping"
     PROCESSING = "processing"
     COMPLETED = "completed"
     ERROR = "error"
@@ -24,7 +23,6 @@ STATUS_PRIORITY: dict[str, int] = {
     SessionStatus.READY: 2,
     SessionStatus.RECORDING: 3,
     SessionStatus.PAUSED: 3,       # Same level as recording (lateral move)
-    SessionStatus.STOPPING: 4,
     SessionStatus.PROCESSING: 5,
     SessionStatus.COMPLETED: 6,
     SessionStatus.ERROR: 6,        # Terminal state, same level as completed

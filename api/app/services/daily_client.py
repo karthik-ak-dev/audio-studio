@@ -113,7 +113,10 @@ class DailyClient:
             )
             response.raise_for_status()
             data: dict[str, object] = response.json()
-            logger.info("Recording started for room: %s, id: %s", room_name, data.get("recordingId"))
+            logger.info(
+                "Recording started: room=%s id=%s",
+                room_name, data.get("recordingId"),
+            )
             return data
 
     async def stop_recording(self, room_name: str) -> Optional[dict[str, object]]:

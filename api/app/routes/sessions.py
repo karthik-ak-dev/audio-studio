@@ -14,7 +14,7 @@ Endpoints:
   POST /sessions/{session_id}/join   → FE reports: participant joined the room
   POST /sessions/{session_id}/leave  → FE reports: participant left the room
   POST /sessions/{session_id}/start  → Host starts recording
-  POST /sessions/{session_id}/stop   → Host stops recording → processing
+  POST /sessions/{session_id}/end    → Host ends session → processing (TERMINAL)
   POST /sessions/{session_id}/pause  → Host pauses recording
   POST /sessions/{session_id}/resume → Host resumes recording (new segment)
   GET  /sessions/user/{host_user_id} → List sessions for a host
@@ -22,7 +22,7 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException
 
-from app.types.requests import CreateSessionRequest
+from app.types.requests import CreateSessionRequest, JoinRequest, LeaveRequest
 from app.types.responses import (
     CreateSessionResponse,
     SessionActionResponse,
@@ -57,24 +57,25 @@ async def get_session(session_id: str) -> SessionResponse:
 
 # ─── Participant lifecycle (FE-driven) ────────────
 # Called by the frontend when daily-js reports join/leave events.
-# These are fire-and-forget from the FE side — failures don't block the UI.
+# Join is BLOCKING (FE waits for response before updating UI).
+# Leave fires when user explicitly clicks "Leave Session".
 # Webhooks from Daily.co act as a safety net if these calls are missed.
 
 
 @router.post("/{session_id}/join", response_model=SessionActionResponse)
-async def join_session(session_id: str) -> SessionActionResponse:
+async def join_session(session_id: str, req: JoinRequest) -> SessionActionResponse:
     """FE reports: participant joined the Daily.co room."""
     try:
-        return await session_service.join_session(session_id)
+        return await session_service.join_session(session_id, req)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
 
 
 @router.post("/{session_id}/leave", response_model=SessionActionResponse)
-async def leave_session(session_id: str) -> SessionActionResponse:
+async def leave_session(session_id: str, req: LeaveRequest) -> SessionActionResponse:
     """FE reports: participant left the Daily.co room."""
     try:
-        return await session_service.leave_session(session_id)
+        return await session_service.leave_session(session_id, req)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
 
@@ -96,11 +97,11 @@ async def start_recording(session_id: str) -> SessionActionResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/{session_id}/stop", response_model=SessionActionResponse)
-async def stop_session(session_id: str) -> SessionActionResponse:
-    """Host stops recording. Moves session to processing."""
+@router.post("/{session_id}/end", response_model=SessionActionResponse)
+async def end_session(session_id: str) -> SessionActionResponse:
+    """Host ends session. Moves to processing. ONLY terminal user action."""
     try:
-        return await session_service.stop_session(session_id)
+        return await session_service.end_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
     except InvalidSessionStateError as exc:
