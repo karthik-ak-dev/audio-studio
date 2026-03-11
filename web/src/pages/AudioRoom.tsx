@@ -150,10 +150,11 @@ export function AudioRoom() {
         return;
       }
 
-      const { token: storedToken, isHost: storedIsHost, roomUrl: storedRoomUrl } = JSON.parse(stored) as {
+      const { token: storedToken, isHost: storedIsHost, roomUrl: storedRoomUrl, guestJoinUrl: storedGuestJoinUrl } = JSON.parse(stored) as {
         token: string;
         isHost: boolean;
         roomUrl: string;
+        guestJoinUrl?: string;
       };
 
       const session = await getSession(sessionId);
@@ -178,9 +179,8 @@ export function AudioRoom() {
       });
       dispatch({ type: "SESSION_SYNCED", payload: { session } });
 
-      if (storedIsHost) {
-        const guestUrl = `${window.location.origin}/join/${sessionId}?t=${storedToken}`;
-        setGuestLink(guestUrl);
+      if (storedIsHost && storedGuestJoinUrl) {
+        setGuestLink(storedGuestJoinUrl);
       }
 
       setInitialized(true);
@@ -197,23 +197,24 @@ export function AudioRoom() {
   }, [roomUrl, token, daily.isJoined, daily.join, initialized, sdkError]);
 
   // ─── 3. Notify server of join (blocking, once, with retry) ───
+  const userName = isHost ? (sessionState.hostName ?? "") : (sessionState.guestName ?? "");
   useEffect(() => {
     if (
       daily.isJoined &&
       sessionId &&
       daily.localConnectionId &&
       daily.localUserId &&
+      userName &&
       !joinNotifiedRef.current
     ) {
       joinNotifiedRef.current = true;
-      const userName = isHost ? (sessionState.hostName ?? "") : (sessionState.guestName ?? "");
       void joinSession(sessionId, {
         user_id: daily.localUserId,
         connection_id: daily.localConnectionId,
         user_name: userName,
       });
     }
-  }, [daily.isJoined, daily.localConnectionId, daily.localUserId, sessionId, isHost, sessionState.hostName, sessionState.guestName, joinSession]);
+  }, [daily.isJoined, daily.localConnectionId, daily.localUserId, sessionId, userName, joinSession]);
 
   // ─── 4. Interval poll (every 3s, silent) ───
   useEffect(() => {

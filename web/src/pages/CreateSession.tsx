@@ -37,6 +37,7 @@ export function CreateSession() {
           token: result.host_token,
           isHost: true,
           roomUrl: result.room_url,
+          guestJoinUrl: result.guest_join_url,
         }),
       );
 
