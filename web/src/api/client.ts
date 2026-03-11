@@ -41,6 +41,16 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
+export interface JoinSessionBody {
+  user_id: string;
+  connection_id: string;
+  user_name: string;
+}
+
+export interface LeaveSessionBody {
+  user_id: string;
+}
+
 export const api = {
   createSession(data: CreateSessionRequest): Promise<CreateSessionResponse> {
     return request<CreateSessionResponse>("/sessions/", {
@@ -53,15 +63,17 @@ export const api = {
     return request<Session>(`/sessions/${sessionId}`);
   },
 
-  joinSession(sessionId: string): Promise<SessionActionResponse> {
+  joinSession(sessionId: string, body: JoinSessionBody): Promise<SessionActionResponse> {
     return request<SessionActionResponse>(`/sessions/${sessionId}/join`, {
       method: "POST",
+      body: JSON.stringify(body),
     });
   },
 
-  leaveSession(sessionId: string): Promise<SessionActionResponse> {
+  leaveSession(sessionId: string, body: LeaveSessionBody): Promise<SessionActionResponse> {
     return request<SessionActionResponse>(`/sessions/${sessionId}/leave`, {
       method: "POST",
+      body: JSON.stringify(body),
     });
   },
 
@@ -71,8 +83,8 @@ export const api = {
     });
   },
 
-  stopSession(sessionId: string): Promise<SessionActionResponse> {
-    return request<SessionActionResponse>(`/sessions/${sessionId}/stop`, {
+  endSession(sessionId: string): Promise<SessionActionResponse> {
+    return request<SessionActionResponse>(`/sessions/${sessionId}/end`, {
       method: "POST",
     });
   },

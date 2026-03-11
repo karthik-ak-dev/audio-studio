@@ -5,30 +5,31 @@ import DailyIframe, {
   type DailyEventObjectParticipantLeft,
   type DailyEventObjectNetworkQualityEvent,
 } from "@daily-co/daily-js";
-import type { DailyCallState, DailyParticipant, NetworkQuality } from "@/types/daily";
+import type { DailyCallState, DailyParticipant, DailySdkEvent, NetworkQuality } from "@/types/daily";
 
 interface UseDailyOptions {
   roomUrl: string;
   token: string;
-  onJoined?: () => void;
-  onLeft?: () => void;
+  /** Called when SDK fires an event we care about — triggers immediate server poll */
+  onSdkEvent?: (event: DailySdkEvent) => void;
   onError?: (error: string) => void;
 }
 
 const initialState: DailyCallState = {
   isJoined: false,
   isMuted: false,
-  isRecording: false,
-  participantCount: 0,
   networkQuality: "unknown",
   micLevel: 0,
   participants: [],
   error: null,
+  localConnectionId: null,
+  localUserId: null,
 };
 
 function mapParticipant(p: Record<string, unknown>): DailyParticipant {
   return {
     session_id: String(p.session_id ?? ""),
+    user_id: String(p.user_id ?? ""),
     user_name: String(p.user_name ?? ""),
     local: Boolean(p.local),
     audio: Boolean(p.audio),
@@ -36,7 +37,7 @@ function mapParticipant(p: Record<string, unknown>): DailyParticipant {
   };
 }
 
-export function useDaily({ roomUrl, token, onJoined, onLeft, onError }: UseDailyOptions) {
+export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOptions) {
   const [state, setState] = useState<DailyCallState>(initialState);
   const callRef = useRef<DailyCall | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -47,10 +48,18 @@ export function useDaily({ roomUrl, token, onJoined, onLeft, onError }: UseDaily
     const mapped: DailyParticipant[] = Object.values(allParticipants).map(
       (p) => mapParticipant(p as unknown as Record<string, unknown>),
     );
+
+    // Extract local user's connection_id and user_id
+    const local = allParticipants.local;
+    const rawLocal = local as unknown as Record<string, unknown>;
+    const localConnectionId = local ? String(rawLocal.session_id ?? "") : null;
+    const localUserId = local ? String(rawLocal.user_id ?? "") : null;
+
     setState((prev) => ({
       ...prev,
       participants: mapped,
-      participantCount: mapped.length,
+      localConnectionId,
+      localUserId,
     }));
   }, []);
 
@@ -96,29 +105,26 @@ export function useDaily({ roomUrl, token, onJoined, onLeft, onError }: UseDaily
       call.on("joined-meeting", () => {
         setState((prev) => ({ ...prev, isJoined: true, error: null }));
         updateParticipants(call);
-        onJoined?.();
 
         // Start mic level monitoring
-        const localTracks = call.participants().local;
-        if (localTracks) {
-          const tracks = call.participants().local?.tracks;
-          const audioTrack = tracks?.audio?.persistentTrack;
-          if (audioTrack) {
-            const stream = new MediaStream([audioTrack]);
-            startMicLevelMonitor(stream);
-          }
+        const tracks = call.participants().local?.tracks;
+        const audioTrack = tracks?.audio?.persistentTrack;
+        if (audioTrack) {
+          const stream = new MediaStream([audioTrack]);
+          startMicLevelMonitor(stream);
         }
       });
 
       call.on("left-meeting", () => {
         setState(initialState);
-        onLeft?.();
       });
 
+      // Participant events — update local SDK state + trigger server poll
       call.on(
         "participant-joined",
         (_event?: DailyEventObjectParticipant) => {
           updateParticipants(call);
+          onSdkEvent?.("participant-joined");
         },
       );
 
@@ -126,6 +132,7 @@ export function useDaily({ roomUrl, token, onJoined, onLeft, onError }: UseDaily
         "participant-left",
         (_event?: DailyEventObjectParticipantLeft) => {
           updateParticipants(call);
+          onSdkEvent?.("participant-left");
         },
       );
 
@@ -147,12 +154,13 @@ export function useDaily({ roomUrl, token, onJoined, onLeft, onError }: UseDaily
         },
       );
 
+      // Recording events — only trigger server poll (server owns recording state)
       call.on("recording-started", () => {
-        setState((prev) => ({ ...prev, isRecording: true }));
+        onSdkEvent?.("recording-started");
       });
 
       call.on("recording-stopped", () => {
-        setState((prev) => ({ ...prev, isRecording: false }));
+        onSdkEvent?.("recording-stopped");
       });
 
       call.on("error", (event) => {
@@ -167,7 +175,7 @@ export function useDaily({ roomUrl, token, onJoined, onLeft, onError }: UseDaily
       setState((prev) => ({ ...prev, error: msg }));
       onError?.(msg);
     }
-  }, [roomUrl, token, onJoined, onLeft, onError, updateParticipants, startMicLevelMonitor]);
+  }, [roomUrl, token, onSdkEvent, onError, updateParticipants, startMicLevelMonitor]);
 
   const leave = useCallback(async () => {
     cancelAnimationFrame(animFrameRef.current);

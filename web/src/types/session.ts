@@ -1,9 +1,8 @@
 export type SessionStatus =
   | "created"
-  | "waiting_for_guest"
+  | "ready"
   | "recording"
   | "paused"
-  | "stopping"
   | "processing"
   | "completed"
   | "error";
@@ -29,11 +28,21 @@ export interface Session {
   host_name: string;
   guest_name: string;
   daily_room_url: string | null;
+
+  // Server-driven participant tracking
   participant_count: number;
+  active_participants: string[];
+  participants: Record<string, string>;
+
+  // Recording state
   recording_segments: number;
   recording_started_at: string | null;
   recording_stopped_at: string | null;
+
+  // S3 data
+  s3_key: string | null;
   s3_processed_prefix: string | null;
+
   error_message: string | null;
   created_at: string;
   updated_at: string;

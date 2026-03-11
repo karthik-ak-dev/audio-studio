@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
 
+const STORAGE_PREFIX = "audio-studio:";
+
 export function CreateSession() {
   const navigate = useNavigate();
   const dispatch = useSessionDispatch();
@@ -19,13 +21,25 @@ export function CreateSession() {
     e.preventDefault();
     clearError();
 
+    const hostUserId = `host-${Date.now()}`;
+
     const result = await createSession({
-      host_user_id: `host-${Date.now()}`,
+      host_user_id: hostUserId,
       host_name: hostName.trim(),
       guest_name: guestName.trim(),
     });
 
     if (result) {
+      // Store token in sessionStorage for refresh persistence
+      sessionStorage.setItem(
+        `${STORAGE_PREFIX}${result.session_id}`,
+        JSON.stringify({
+          token: result.host_token,
+          isHost: true,
+          roomUrl: result.room_url,
+        }),
+      );
+
       dispatch({
         type: "SESSION_CREATED",
         payload: {
@@ -35,6 +49,7 @@ export function CreateSession() {
           guestJoinUrl: result.guest_join_url,
           hostName: hostName.trim(),
           guestName: guestName.trim(),
+          hostUserId,
         },
       });
       navigate(`/session/${result.session_id}`);

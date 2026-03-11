@@ -12,10 +12,9 @@ import type { Session, SessionStatus } from "@/types/session";
 
 const statusBadgeVariant: Record<SessionStatus, "accent" | "warning" | "error" | "neutral"> = {
   created: "neutral",
-  waiting_for_guest: "neutral",
+  ready: "neutral",
   recording: "accent",
   paused: "warning",
-  stopping: "warning",
   processing: "warning",
   completed: "accent",
   error: "error",
@@ -23,10 +22,9 @@ const statusBadgeVariant: Record<SessionStatus, "accent" | "warning" | "error" |
 
 const statusLabel: Record<SessionStatus, string> = {
   created: "Created",
-  waiting_for_guest: "Waiting",
+  ready: "Ready",
   recording: "Recording",
   paused: "Paused",
-  stopping: "Stopping",
   processing: "Processing",
   completed: "Completed",
   error: "Error",
@@ -34,7 +32,7 @@ const statusLabel: Record<SessionStatus, string> = {
 
 export function SessionComplete() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const { getSession, error } = useSessionApi();
+  const { pollSession, getSession, error } = useSessionApi();
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
@@ -47,8 +45,9 @@ export function SessionComplete() {
 
     void fetchSession();
 
+    // Poll until terminal state
     const interval = setInterval(async () => {
-      const result = await getSession(sessionId);
+      const result = await pollSession(sessionId);
       if (result) {
         setSession(result);
         if (result.status === "completed" || result.status === "error") {
@@ -58,7 +57,7 @@ export function SessionComplete() {
     }, SESSION_POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [sessionId, getSession]);
+  }, [sessionId, getSession, pollSession]);
 
   if (error) {
     return (
@@ -76,9 +75,12 @@ export function SessionComplete() {
     );
   }
 
-  const isProcessing = session.status === "processing" || session.status === "stopping";
+  const isProcessing = session.status === "processing";
   const isCompleted = session.status === "completed";
   const isError = session.status === "error";
+
+  // Build participant names from roster
+  const participantNames = Object.values(session.participants);
 
   return (
     <PageContainer>
@@ -144,7 +146,7 @@ export function SessionComplete() {
               <DetailCard label="Host" value={session.host_name} />
               <DetailCard label="Guest" value={session.guest_name} />
               <DetailCard label="Segments" value={String(session.recording_segments)} />
-              <DetailCard label="Session" value={session.session_id} mono />
+              <DetailCard label="Participants" value={participantNames.join(", ") || "—"} />
             </div>
 
             {/* Timestamps */}
@@ -186,7 +188,7 @@ export function SessionComplete() {
               </div>
             )}
 
-            {/* Completed */}
+            {/* Completed — show S3 info */}
             {isCompleted && (
               <div className="rounded-md bg-accent/[0.06] px-4 py-4 ring-1 ring-accent/10">
                 <div className="flex items-center gap-2">
@@ -195,13 +197,21 @@ export function SessionComplete() {
                   </svg>
                   <span className="text-sm font-medium text-accent">Audio files ready</span>
                 </div>
-                {session.s3_processed_prefix && (
+                {session.s3_key && (
                   <p className="mt-2 break-all font-mono text-[10px] text-text-muted">
+                    {session.s3_key}
+                  </p>
+                )}
+                {session.s3_processed_prefix && (
+                  <p className="mt-1 break-all font-mono text-[10px] text-text-muted">
                     {session.s3_processed_prefix}
                   </p>
                 )}
               </div>
             )}
+
+            {/* Session ID */}
+            <DetailRow label="Session ID" value={session.session_id} />
 
             {/* New session button */}
             <Link to="/" className="w-full">
@@ -216,13 +226,13 @@ export function SessionComplete() {
   );
 }
 
-function DetailCard({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function DetailCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-1 rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
       <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
         {label}
       </span>
-      <span className={`text-sm text-text ${mono ? "font-mono text-xs" : "font-medium"}`}>
+      <span className="text-sm font-medium text-text">
         {value}
       </span>
     </div>

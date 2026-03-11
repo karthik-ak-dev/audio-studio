@@ -8,6 +8,8 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
 
+const STORAGE_PREFIX = "audio-studio:";
+
 export function JoinSession() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
@@ -41,14 +43,23 @@ export function JoinSession() {
   const handleJoin = () => {
     if (!sessionId || !token) return;
 
+    // Store token in sessionStorage for refresh persistence
+    sessionStorage.setItem(
+      `${STORAGE_PREFIX}${sessionId}`,
+      JSON.stringify({
+        token,
+        isHost: false,
+        roomUrl,
+      }),
+    );
+
     dispatch({
-      type: "SESSION_JOINED",
+      type: "SESSION_LOADED",
       payload: {
         sessionId,
         roomUrl,
         token,
-        hostName,
-        guestName,
+        isHost: false,
       },
     });
 

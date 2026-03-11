@@ -5,9 +5,12 @@ interface UseRecordingTimerReturn {
   elapsedSeconds: number;
   formatted: string;
   progress: number;
+  isRunning: boolean;
   start: () => void;
   stop: () => void;
   reset: () => void;
+  /** Sync elapsed time from a server-provided ISO timestamp */
+  syncWithServer: (startedAt: string) => void;
 }
 
 function formatTime(totalSeconds: number): string {
@@ -41,6 +44,14 @@ export function useRecordingTimer(): UseRecordingTimerReturn {
     setElapsedSeconds(0);
   }, []);
 
+  /** Derive elapsed from server timestamp — survives refresh */
+  const syncWithServer = useCallback((startedAt: string) => {
+    const startTime = new Date(startedAt).getTime();
+    const now = Date.now();
+    const elapsed = Math.max(0, Math.floor((now - startTime) / 1000));
+    setElapsedSeconds(elapsed);
+  }, []);
+
   useEffect(() => {
     if (isRunning) {
       intervalRef.current = setInterval(() => {
@@ -62,8 +73,10 @@ export function useRecordingTimer(): UseRecordingTimerReturn {
     elapsedSeconds,
     formatted: formatTime(elapsedSeconds),
     progress: elapsedSeconds / MAX_RECORDING_DURATION_SEC,
+    isRunning,
     start,
     stop,
     reset,
+    syncWithServer,
   };
 }

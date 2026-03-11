@@ -5,7 +5,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
-import type { SessionStatus } from "@/types/session";
+import type { Session, SessionStatus } from "@/types/session";
 
 // ─── State ───────────────────────────────────────
 
@@ -14,11 +14,23 @@ interface SessionState {
   roomUrl: string | null;
   token: string | null;
   guestJoinUrl: string | null;
+  isHost: boolean;
+  error: string | null;
+
+  // Server-driven fields — updated from poll responses
   status: SessionStatus | null;
   hostName: string | null;
   guestName: string | null;
-  isHost: boolean;
-  error: string | null;
+  hostUserId: string | null;
+  participantCount: number;
+  activeParticipants: string[];
+  participantsRoster: Record<string, string>;
+  recordingSegments: number;
+  recordingStartedAt: string | null;
+  recordingStoppedAt: string | null;
+  s3Key: string | null;
+  s3ProcessedPrefix: string | null;
+  errorMessage: string | null;
 }
 
 const initialState: SessionState = {
@@ -26,11 +38,21 @@ const initialState: SessionState = {
   roomUrl: null,
   token: null,
   guestJoinUrl: null,
+  isHost: false,
+  error: null,
   status: null,
   hostName: null,
   guestName: null,
-  isHost: false,
-  error: null,
+  hostUserId: null,
+  participantCount: 0,
+  activeParticipants: [],
+  participantsRoster: {},
+  recordingSegments: 0,
+  recordingStartedAt: null,
+  recordingStoppedAt: null,
+  s3Key: null,
+  s3ProcessedPrefix: null,
+  errorMessage: null,
 };
 
 // ─── Actions ─────────────────────────────────────
@@ -45,19 +67,19 @@ type SessionAction =
         guestJoinUrl: string;
         hostName: string;
         guestName: string;
+        hostUserId: string;
       };
     }
   | {
-      type: "SESSION_JOINED";
+      type: "SESSION_LOADED";
       payload: {
         sessionId: string;
         roomUrl: string;
         token: string;
-        hostName: string;
-        guestName: string;
+        isHost: boolean;
       };
     }
-  | { type: "STATUS_UPDATED"; payload: { status: SessionStatus } }
+  | { type: "SESSION_SYNCED"; payload: { session: Session } }
   | { type: "ERROR_OCCURRED"; payload: { error: string } }
   | { type: "SESSION_RESET" };
 
@@ -74,35 +96,51 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         guestJoinUrl: action.payload.guestJoinUrl,
         hostName: action.payload.hostName,
         guestName: action.payload.guestName,
+        hostUserId: action.payload.hostUserId,
         status: "created",
         isHost: true,
         error: null,
       };
-    case "SESSION_JOINED":
+
+    case "SESSION_LOADED":
       return {
         ...state,
         sessionId: action.payload.sessionId,
         roomUrl: action.payload.roomUrl,
         token: action.payload.token,
-        hostName: action.payload.hostName,
-        guestName: action.payload.guestName,
-        status: "created",
-        isHost: false,
+        isHost: action.payload.isHost,
         error: null,
       };
-    case "STATUS_UPDATED":
+
+    case "SESSION_SYNCED": {
+      const s = action.payload.session;
       return {
         ...state,
-        status: action.payload.status,
+        status: s.status,
+        hostName: s.host_name,
+        guestName: s.guest_name,
+        hostUserId: s.host_user_id,
+        participantCount: s.participant_count,
+        activeParticipants: s.active_participants,
+        participantsRoster: s.participants,
+        recordingSegments: s.recording_segments,
+        recordingStartedAt: s.recording_started_at,
+        recordingStoppedAt: s.recording_stopped_at,
+        s3Key: s.s3_key,
+        s3ProcessedPrefix: s.s3_processed_prefix,
+        errorMessage: s.error_message,
       };
+    }
+
     case "ERROR_OCCURRED":
       return {
         ...state,
-        status: "error",
         error: action.payload.error,
       };
+
     case "SESSION_RESET":
       return initialState;
+
     default:
       return state;
   }

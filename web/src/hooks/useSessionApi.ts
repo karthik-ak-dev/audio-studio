@@ -1,20 +1,28 @@
 import { useCallback, useRef, useState } from "react";
 import { api, ApiError } from "@/api/client";
+import type { JoinSessionBody, LeaveSessionBody } from "@/api/client";
 import type { CreateSessionRequest, CreateSessionResponse, Session } from "@/types/session";
+
+/** Return type for action calls: true=success, false=real error, "stale"=400 (re-poll needed) */
+export type ActionResult = true | false | "stale";
 
 interface UseSessionApiReturn {
   loading: boolean;
   error: string | null;
   createSession: (data: CreateSessionRequest) => Promise<CreateSessionResponse | null>;
   getSession: (sessionId: string) => Promise<Session | null>;
-  joinSession: (sessionId: string) => Promise<void>;
-  leaveSession: (sessionId: string) => Promise<void>;
-  startRecording: (sessionId: string) => Promise<boolean>;
-  stopSession: (sessionId: string) => Promise<boolean>;
-  pauseSession: (sessionId: string) => Promise<boolean>;
-  resumeSession: (sessionId: string) => Promise<boolean>;
+  /** Silent poll — no loading flag, no error state. Returns null on failure. */
+  pollSession: (sessionId: string) => Promise<Session | null>;
+  joinSession: (sessionId: string, body: JoinSessionBody) => Promise<boolean>;
+  leaveSession: (sessionId: string, body: LeaveSessionBody) => Promise<boolean>;
+  startRecording: (sessionId: string) => Promise<ActionResult>;
+  endSession: (sessionId: string) => Promise<ActionResult>;
+  pauseSession: (sessionId: string) => Promise<ActionResult>;
+  resumeSession: (sessionId: string) => Promise<ActionResult>;
   clearError: () => void;
 }
+
+const JOIN_RETRY_DELAY_MS = 2000;
 
 export function useSessionApi(): UseSessionApiReturn {
   const [loading, setLoading] = useState<boolean>(false);
@@ -40,8 +48,7 @@ export function useSessionApi(): UseSessionApiReturn {
       setLoading(true);
       setError(null);
       try {
-        const result = await api.createSession(data);
-        return result;
+        return await api.createSession(data);
       } catch (err) {
         return handleError(err);
       } finally {
@@ -66,37 +73,66 @@ export function useSessionApi(): UseSessionApiReturn {
     [handleError],
   );
 
-  // Fire-and-forget: notify server of join/leave without blocking UI
-  const joinSession = useCallback(
-    async (sessionId: string): Promise<void> => {
+  // Silent poll — no loading flag, no error state
+  const pollSession = useCallback(
+    async (sessionId: string): Promise<Session | null> => {
       try {
-        await api.joinSession(sessionId);
+        return await api.getSession(sessionId);
+      } catch {
+        return null;
+      }
+    },
+    [],
+  );
+
+  // Blocking join with retry-once-after-2s
+  const joinSession = useCallback(
+    async (sessionId: string, body: JoinSessionBody): Promise<boolean> => {
+      try {
+        await api.joinSession(sessionId, body);
+        return true;
       } catch (err) {
-        console.warn("Failed to notify server of join:", err);
+        console.warn("Join attempt 1 failed, retrying in 2s:", err);
+        // Retry once after delay
+        await new Promise((r) => setTimeout(r, JOIN_RETRY_DELAY_MS));
+        try {
+          await api.joinSession(sessionId, body);
+          return true;
+        } catch (retryErr) {
+          console.warn("Join attempt 2 failed:", retryErr);
+          return false;
+        }
       }
     },
     [],
   );
 
   const leaveSession = useCallback(
-    async (sessionId: string): Promise<void> => {
+    async (sessionId: string, body: LeaveSessionBody): Promise<boolean> => {
       try {
-        await api.leaveSession(sessionId);
+        await api.leaveSession(sessionId, body);
+        return true;
       } catch (err) {
         console.warn("Failed to notify server of leave:", err);
+        return false;
       }
     },
     [],
   );
 
-  const startRecording = useCallback(
-    async (sessionId: string): Promise<boolean> => {
+  // Action helper: returns "stale" on 400 (server state diverged), false on real error
+  const executeAction = useCallback(
+    async (action: () => Promise<unknown>): Promise<ActionResult> => {
       setLoading(true);
       setError(null);
       try {
-        await api.startRecording(sessionId);
+        await action();
         return true;
       } catch (err) {
+        // 400 = state mismatch → caller should re-poll silently, no error shown
+        if (err instanceof ApiError && err.status === 400) {
+          return "stale";
+        }
         handleError(err);
         return false;
       } finally {
@@ -106,55 +142,24 @@ export function useSessionApi(): UseSessionApiReturn {
     [handleError],
   );
 
-  const stopSession = useCallback(
-    async (sessionId: string): Promise<boolean> => {
-      setLoading(true);
-      setError(null);
-      try {
-        await api.stopSession(sessionId);
-        return true;
-      } catch (err) {
-        handleError(err);
-        return false;
-      } finally {
-        if (mountedRef.current) setLoading(false);
-      }
-    },
-    [handleError],
+  const startRecording = useCallback(
+    (sessionId: string) => executeAction(() => api.startRecording(sessionId)),
+    [executeAction],
+  );
+
+  const endSession = useCallback(
+    (sessionId: string) => executeAction(() => api.endSession(sessionId)),
+    [executeAction],
   );
 
   const pauseSession = useCallback(
-    async (sessionId: string): Promise<boolean> => {
-      setLoading(true);
-      setError(null);
-      try {
-        await api.pauseSession(sessionId);
-        return true;
-      } catch (err) {
-        handleError(err);
-        return false;
-      } finally {
-        if (mountedRef.current) setLoading(false);
-      }
-    },
-    [handleError],
+    (sessionId: string) => executeAction(() => api.pauseSession(sessionId)),
+    [executeAction],
   );
 
   const resumeSession = useCallback(
-    async (sessionId: string): Promise<boolean> => {
-      setLoading(true);
-      setError(null);
-      try {
-        await api.resumeSession(sessionId);
-        return true;
-      } catch (err) {
-        handleError(err);
-        return false;
-      } finally {
-        if (mountedRef.current) setLoading(false);
-      }
-    },
-    [handleError],
+    (sessionId: string) => executeAction(() => api.resumeSession(sessionId)),
+    [executeAction],
   );
 
   return {
@@ -162,10 +167,11 @@ export function useSessionApi(): UseSessionApiReturn {
     error,
     createSession,
     getSession,
+    pollSession,
     joinSession,
     leaveSession,
     startRecording,
-    stopSession,
+    endSession,
     pauseSession,
     resumeSession,
     clearError,

@@ -1,5 +1,6 @@
 export interface DailyParticipant {
-  session_id: string;
+  session_id: string; // Daily's per-connection ID
+  user_id: string; // Our app user_id from meeting token
   user_name: string;
   local: boolean;
   audio: boolean;
@@ -8,13 +9,22 @@ export interface DailyParticipant {
 
 export type NetworkQuality = "good" | "warning" | "bad" | "unknown";
 
+/** SDK event names we listen to for triggering server polls */
+export type DailySdkEvent =
+  | "participant-joined"
+  | "participant-left"
+  | "recording-started"
+  | "recording-stopped";
+
 export interface DailyCallState {
   isJoined: boolean;
   isMuted: boolean;
-  isRecording: boolean;
-  participantCount: number;
   networkQuality: NetworkQuality;
   micLevel: number;
   participants: DailyParticipant[];
   error: string | null;
+  /** Local user's Daily connection_id (session_id in Daily terms) */
+  localConnectionId: string | null;
+  /** Local user's user_id from the meeting token */
+  localUserId: string | null;
 }

@@ -1,56 +1,98 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/Button";
+import type { SessionStatus } from "@/types/session";
 
 interface RecordingControlsProps {
-  isRecording: boolean;
-  isPaused: boolean;
+  status: SessionStatus | null;
   isHost: boolean;
-  isReadyToRecord: boolean;
+  canStartRecording: boolean;
+  canResume: boolean;
   loading: boolean;
   onStart: () => void;
-  onStop: () => void;
+  onEnd: () => void;
   onPause: () => void;
   onResume: () => void;
+  onLeave: () => void;
 }
 
 export function RecordingControls({
-  isRecording,
-  isPaused,
+  status,
   isHost,
-  isReadyToRecord,
+  canStartRecording,
+  canResume,
   loading,
   onStart,
-  onStop,
+  onEnd,
   onPause,
   onResume,
+  onLeave,
 }: RecordingControlsProps) {
-  // Derive the actual recording state — isPaused takes priority over isRecording
-  // because our session status is the source of truth (Daily SDK may lag behind)
-  const activelyRecording = isRecording && !isPaused;
-  const notStarted = !isRecording && !isPaused;
+  const [showEndConfirm, setShowEndConfirm] = useState<boolean>(false);
 
+  const isRecording = status === "recording";
+  const isPaused = status === "paused";
+  const isReady = status === "ready" || status === "created";
+
+  // Guest view — status indicator only
   if (!isHost) {
     return (
-      <div className="flex items-center gap-2 rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
-        {isPaused ? (
-          <span className="inline-flex h-3 w-3 rounded-sm bg-yellow-400/80" />
-        ) : activelyRecording ? (
-          <span className="relative flex h-3 w-3">
-            <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-red-500" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+      <div className="flex flex-col items-center gap-3 w-full">
+        <div className="flex items-center gap-2 rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
+          {isPaused ? (
+            <span className="inline-flex h-3 w-3 rounded-sm bg-yellow-400/80" />
+          ) : isRecording ? (
+            <span className="relative flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-red-500" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+            </span>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-text-muted">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4l3 3" />
+            </svg>
+          )}
+          <span className={`text-xs ${isPaused ? "text-yellow-400" : isRecording ? "text-red-400" : "text-text-muted"}`}>
+            {isPaused
+              ? "Recording paused by host"
+              : isRecording
+                ? "Recording in progress"
+                : "Waiting for host to start recording"}
           </span>
-        ) : (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-text-muted">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v4l3 3" />
-          </svg>
-        )}
-        <span className={`text-xs ${isPaused ? "text-yellow-400" : activelyRecording ? "text-red-400" : "text-text-muted"}`}>
-          {isPaused
-            ? "Recording paused by host"
-            : activelyRecording
-              ? "Recording in progress"
-              : "Waiting for host to start recording"}
-        </span>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onLeave}>
+          Leave Session
+        </Button>
+      </div>
+    );
+  }
+
+  // End session confirmation dialog
+  if (showEndConfirm) {
+    return (
+      <div className="flex w-full flex-col items-center gap-3">
+        <p className="text-sm text-text-muted">
+          End session and stop recording? This cannot be undone.
+        </p>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => setShowEndConfirm(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            size="md"
+            onClick={() => {
+              setShowEndConfirm(false);
+              onEnd();
+            }}
+            loading={loading}
+          >
+            End Session
+          </Button>
+        </div>
       </div>
     );
   }
@@ -58,19 +100,19 @@ export function RecordingControls({
   return (
     <div className="flex w-full flex-col items-center gap-3">
       {/* Pre-recording: host can start */}
-      {notStarted && (
+      {isReady && (
         <>
           <Button
             variant="primary"
             size="lg"
             onClick={onStart}
             loading={loading}
-            disabled={!isReadyToRecord}
+            disabled={!canStartRecording}
             className="w-full max-w-[240px]"
           >
             Start Recording
           </Button>
-          {!isReadyToRecord && (
+          {!canStartRecording && (
             <div className="flex items-center gap-2">
               <span className="h-1.5 w-1.5 animate-blink rounded-full bg-text-muted/40" />
               <span className="text-xs text-text-muted">
@@ -81,8 +123,8 @@ export function RecordingControls({
         </>
       )}
 
-      {/* Recording: pause or stop */}
-      {activelyRecording && (
+      {/* Recording: pause or end */}
+      {isRecording && (
         <div className="flex items-center gap-3">
           <Button
             variant="secondary"
@@ -95,10 +137,9 @@ export function RecordingControls({
           <Button
             variant="danger"
             size="md"
-            onClick={onStop}
-            loading={loading}
+            onClick={() => setShowEndConfirm(true)}
           >
-            Stop Recording
+            End Session
           </Button>
         </div>
       )}
@@ -111,17 +152,22 @@ export function RecordingControls({
             size="md"
             onClick={onResume}
             loading={loading}
+            disabled={!canResume}
           >
             Resume
           </Button>
           <Button
             variant="danger"
             size="md"
-            onClick={onStop}
-            loading={loading}
+            onClick={() => setShowEndConfirm(true)}
           >
             End Session
           </Button>
+          {!canResume && (
+            <span className="text-xs text-text-muted">
+              Waiting for both participants...
+            </span>
+          )}
         </div>
       )}
     </div>

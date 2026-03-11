@@ -1,7 +1,8 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { PageLoader } from "@/components/ui/Loader";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { Timer } from "@/components/session/Timer";
@@ -10,98 +11,211 @@ import { MicLevelMeter } from "@/components/session/MicLevelMeter";
 import { ParticipantStatus } from "@/components/session/ParticipantStatus";
 import { ConnectionStatus } from "@/components/session/ConnectionStatus";
 import { RecordingControls } from "@/components/session/RecordingControls";
+import { DisconnectBanner } from "@/components/session/DisconnectBanner";
 import { useDaily } from "@/hooks/useDaily";
 import { useRecordingTimer } from "@/hooks/useRecordingTimer";
 import { useSessionApi } from "@/hooks/useSessionApi";
+import type { ActionResult } from "@/hooks/useSessionApi";
 import { useSessionState, useSessionDispatch } from "@/context/SessionContext";
 import { SESSION_POLL_INTERVAL_MS } from "@/config/constants";
+import type { DailySdkEvent } from "@/types/daily";
+
+const STORAGE_PREFIX = "audio-studio:";
+const TERMINAL_STATUSES = new Set(["processing", "completed", "error"]);
+const POLL_FAIL_THRESHOLD = 3;
 
 export function AudioRoom() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const sessionState = useSessionState();
   const dispatch = useSessionDispatch();
-  const { loading: apiLoading, getSession, joinSession, leaveSession, startRecording, stopSession, pauseSession, resumeSession } = useSessionApi();
+  const {
+    loading: apiLoading,
+    getSession,
+    pollSession,
+    joinSession,
+    leaveSession,
+    startRecording,
+    endSession,
+    pauseSession,
+    resumeSession,
+  } = useSessionApi();
 
   const [guestLink, setGuestLink] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
-  const [roomUrl, setRoomUrl] = useState<string>("");
-  const [token, setToken] = useState<string>("");
+  const [initialized, setInitialized] = useState<boolean>(false);
+  const [pollFailCount, setPollFailCount] = useState<number>(0);
+  const [sdkError, setSdkError] = useState<string | null>(null);
+  const joinNotifiedRef = useRef<boolean>(false);
 
-  // Load session data if navigated directly
-  useEffect(() => {
-    if (!sessionId) return;
+  // ─── Derive roomUrl/token from context ───
+  const roomUrl = sessionState.roomUrl ?? "";
+  const token = sessionState.token ?? "";
+  const isHost = sessionState.isHost;
 
-    if (sessionState.sessionId === sessionId && sessionState.roomUrl && sessionState.token) {
-      setRoomUrl(sessionState.roomUrl);
-      setToken(sessionState.token);
-      if (sessionState.guestJoinUrl) {
-        setGuestLink(sessionState.guestJoinUrl);
+  // ─── Helper: sync after action (handles "stale" 400 re-poll) ───
+  const syncAfterAction = useCallback(
+    async (result: ActionResult): Promise<boolean> => {
+      if (!sessionId) return false;
+      if (result === "stale") {
+        // 400 = state diverged. Silently re-poll to sync UI, no error shown.
+        const session = await pollSession(sessionId);
+        if (session) {
+          dispatch({ type: "SESSION_SYNCED", payload: { session } });
+          if (TERMINAL_STATUSES.has(session.status)) {
+            navigate(`/session/${sessionId}/complete`);
+          }
+        }
+        return false;
       }
-      return;
-    }
-
-    const loadSession = async () => {
-      const session = await getSession(sessionId);
-      if (session) {
-        dispatch({
-          type: "STATUS_UPDATED",
-          payload: { status: session.status },
-        });
+      if (result === true) {
+        const session = await pollSession(sessionId);
+        if (session) {
+          dispatch({ type: "SESSION_SYNCED", payload: { session } });
+        }
+        return true;
       }
-    };
-
-    void loadSession();
-  }, [sessionId, sessionState, dispatch, getSession]);
-
-  const handleLeft = useCallback(() => {
-    if (sessionId) {
-      void leaveSession(sessionId);
-      navigate(`/session/${sessionId}/complete`);
-    }
-  }, [sessionId, navigate, leaveSession]);
-
-  const handleError = useCallback(
-    (error: string) => {
-      dispatch({ type: "ERROR_OCCURRED", payload: { error } });
+      return false;
     },
-    [dispatch],
+    [sessionId, pollSession, dispatch, navigate],
+  );
+
+  // ─── SDK event handler — triggers immediate server poll ───
+  const handleSdkEvent = useCallback(
+    (_event: DailySdkEvent) => {
+      if (!sessionId) return;
+      void pollSession(sessionId).then((session) => {
+        if (session) {
+          dispatch({ type: "SESSION_SYNCED", payload: { session } });
+          if (TERMINAL_STATUSES.has(session.status)) {
+            navigate(`/session/${sessionId}/complete`);
+          }
+        }
+      });
+    },
+    [sessionId, pollSession, dispatch, navigate],
+  );
+
+  const handleDailyError = useCallback(
+    (error: string) => {
+      // Show inline error — don't navigate away, session state remains visible
+      setSdkError(error);
+    },
+    [],
   );
 
   const daily = useDaily({
     roomUrl,
     token,
-    onLeft: handleLeft,
-    onError: handleError,
+    onSdkEvent: handleSdkEvent,
+    onError: handleDailyError,
   });
 
   const timer = useRecordingTimer();
 
-  // Auto-join when room URL and token are available
+  // ─── Reconnect handler for SDK errors ───
+  const handleReconnect = useCallback(async () => {
+    setSdkError(null);
+    joinNotifiedRef.current = false;
+    await daily.leave();
+    void daily.join();
+  }, [daily]);
+
+  // ─── 1. Initialize: load session from server, read token from sessionStorage ───
   useEffect(() => {
-    if (roomUrl && token && !daily.isJoined) {
+    if (!sessionId || initialized) return;
+
+    const init = async () => {
+      // Try context first (just created or just joined)
+      if (sessionState.sessionId === sessionId && sessionState.roomUrl && sessionState.token) {
+        if (sessionState.guestJoinUrl) {
+          setGuestLink(sessionState.guestJoinUrl);
+        }
+        const session = await getSession(sessionId);
+        if (session) {
+          dispatch({ type: "SESSION_SYNCED", payload: { session } });
+          if (TERMINAL_STATUSES.has(session.status)) {
+            navigate(`/session/${sessionId}/complete`);
+            return;
+          }
+        }
+        setInitialized(true);
+        return;
+      }
+
+      // Read token from sessionStorage (refresh scenario)
+      const stored = sessionStorage.getItem(`${STORAGE_PREFIX}${sessionId}`);
+      if (!stored) {
+        navigate("/");
+        return;
+      }
+
+      const { token: storedToken, isHost: storedIsHost, roomUrl: storedRoomUrl } = JSON.parse(stored) as {
+        token: string;
+        isHost: boolean;
+        roomUrl: string;
+      };
+
+      const session = await getSession(sessionId);
+      if (!session) {
+        navigate("/");
+        return;
+      }
+
+      if (TERMINAL_STATUSES.has(session.status)) {
+        navigate(`/session/${sessionId}/complete`);
+        return;
+      }
+
+      dispatch({
+        type: "SESSION_LOADED",
+        payload: {
+          sessionId,
+          roomUrl: storedRoomUrl || session.daily_room_url || "",
+          token: storedToken,
+          isHost: storedIsHost,
+        },
+      });
+      dispatch({ type: "SESSION_SYNCED", payload: { session } });
+
+      if (storedIsHost) {
+        const guestUrl = `${window.location.origin}/join/${sessionId}?t=${storedToken}`;
+        setGuestLink(guestUrl);
+      }
+
+      setInitialized(true);
+    };
+
+    void init();
+  }, [sessionId, initialized, sessionState, getSession, dispatch, navigate]);
+
+  // ─── 2. Auto-join Daily room ───
+  useEffect(() => {
+    if (roomUrl && token && !daily.isJoined && initialized && !sdkError) {
       void daily.join();
     }
-  }, [roomUrl, token, daily.isJoined, daily.join]);
+  }, [roomUrl, token, daily.isJoined, daily.join, initialized, sdkError]);
 
-  // Notify server when we join the Daily room
+  // ─── 3. Notify server of join (blocking, once, with retry) ───
   useEffect(() => {
-    if (daily.isJoined && sessionId) {
-      void joinSession(sessionId);
+    if (
+      daily.isJoined &&
+      sessionId &&
+      daily.localConnectionId &&
+      daily.localUserId &&
+      !joinNotifiedRef.current
+    ) {
+      joinNotifiedRef.current = true;
+      const userName = isHost ? (sessionState.hostName ?? "") : (sessionState.guestName ?? "");
+      void joinSession(sessionId, {
+        user_id: daily.localUserId,
+        connection_id: daily.localConnectionId,
+        user_name: userName,
+      });
     }
-  }, [daily.isJoined, sessionId, joinSession]);
+  }, [daily.isJoined, daily.localConnectionId, daily.localUserId, sessionId, isHost, sessionState.hostName, sessionState.guestName, joinSession]);
 
-  // Sync recording state with timer
-  useEffect(() => {
-    if (daily.isRecording) {
-      timer.start();
-    } else {
-      timer.stop();
-    }
-  }, [daily.isRecording, timer.start, timer.stop]);
-
-  // Poll session status so guests (and host) stay in sync with server state.
-  // This is how the guest learns about pause/resume/stop actions from the host.
+  // ─── 4. Interval poll (every 3s, silent) ───
   useEffect(() => {
     if (!sessionId || !daily.isJoined) return;
 
@@ -109,16 +223,19 @@ export function AudioRoom() {
 
     const poll = setInterval(async () => {
       if (!active) return;
-      const session = await getSession(sessionId);
-      if (!active || !session) return;
+      const session = await pollSession(sessionId);
+      if (!active) return;
 
-      // Always sync status from server
-      dispatch({ type: "STATUS_UPDATED", payload: { status: session.status } });
+      if (session) {
+        setPollFailCount(0);
+        dispatch({ type: "SESSION_SYNCED", payload: { session } });
 
-      // If session ended, navigate to complete page
-      if (session.status === "processing" || session.status === "completed" || session.status === "error") {
-        clearInterval(poll);
-        navigate(`/session/${sessionId}/complete`);
+        if (TERMINAL_STATUSES.has(session.status)) {
+          clearInterval(poll);
+          navigate(`/session/${sessionId}/complete`);
+        }
+      } else {
+        setPollFailCount((prev) => prev + 1);
       }
     }, SESSION_POLL_INTERVAL_MS);
 
@@ -126,42 +243,54 @@ export function AudioRoom() {
       active = false;
       clearInterval(poll);
     };
-  }, [sessionId, daily.isJoined, getSession, dispatch, navigate]);
+  }, [sessionId, daily.isJoined, pollSession, dispatch, navigate]);
 
+  // ─── 5. Sync timer with server recording state ───
+  useEffect(() => {
+    if (sessionState.status === "recording" && sessionState.recordingStartedAt) {
+      timer.syncWithServer(sessionState.recordingStartedAt);
+      if (!timer.isRunning) timer.start();
+    } else if (sessionState.status === "paused") {
+      timer.stop();
+    } else if (sessionState.status === "ready" || sessionState.status === "created") {
+      timer.reset();
+    }
+  }, [sessionState.status, sessionState.recordingStartedAt, timer]);
+
+  // ─── Action handlers (with 400 re-poll) ───
   const handleStart = async () => {
     if (!sessionId) return;
-    const success = await startRecording(sessionId);
-    if (success) {
-      dispatch({ type: "STATUS_UPDATED", payload: { status: "recording" } });
-      timer.start();
-    }
+    const result = await startRecording(sessionId);
+    await syncAfterAction(result);
   };
 
-  const handleStop = async () => {
+  const handleEnd = async () => {
     if (!sessionId) return;
-    const success = await stopSession(sessionId);
-    if (success) {
-      dispatch({ type: "STATUS_UPDATED", payload: { status: "processing" } });
+    const result = await endSession(sessionId);
+    if (result === true) {
       navigate(`/session/${sessionId}/complete`);
+    } else {
+      await syncAfterAction(result);
     }
   };
 
   const handlePause = async () => {
     if (!sessionId) return;
-    const success = await pauseSession(sessionId);
-    if (success) {
-      dispatch({ type: "STATUS_UPDATED", payload: { status: "paused" } });
-      timer.stop();
-    }
+    const result = await pauseSession(sessionId);
+    await syncAfterAction(result);
   };
 
   const handleResume = async () => {
     if (!sessionId) return;
-    const success = await resumeSession(sessionId);
-    if (success) {
-      dispatch({ type: "STATUS_UPDATED", payload: { status: "recording" } });
-      timer.start();
-    }
+    const result = await resumeSession(sessionId);
+    await syncAfterAction(result);
+  };
+
+  const handleLeave = async () => {
+    if (!sessionId || !daily.localUserId) return;
+    await leaveSession(sessionId, { user_id: daily.localUserId });
+    await daily.leave();
+    navigate(`/session/${sessionId}/complete`);
   };
 
   const handleCopyLink = async () => {
@@ -171,13 +300,31 @@ export function AudioRoom() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Not ready yet
-  if (!roomUrl || !token) {
+  // ─── Derived state from server ───
+  const isRecording = sessionState.status === "recording";
+  const isPaused = sessionState.status === "paused";
+  const isReady = sessionState.status === "ready";
+  const canStartRecording = isReady && sessionState.participantCount >= 2;
+  const canResume = isPaused && sessionState.participantCount >= 2;
+  const showConnectionWarning = pollFailCount >= POLL_FAIL_THRESHOLD;
+
+  // Find disconnected participant name for the banner
+  const disconnectedName = (() => {
+    if (!isPaused || sessionState.participantCount >= 2) return null;
+    const activeSet = new Set(sessionState.activeParticipants);
+    for (const [userId, name] of Object.entries(sessionState.participantsRoster)) {
+      if (!activeSet.has(userId)) return name;
+    }
+    return null;
+  })();
+
+  // ─── Loading / fatal error state ───
+  if (!initialized || (!roomUrl && !sessionState.error)) {
     return (
       <PageContainer>
-        {daily.error || sessionState.error ? (
+        {sessionState.error ? (
           <ErrorState
-            message={daily.error ?? sessionState.error ?? "Unknown error"}
+            message={sessionState.error}
             onRetry={() => navigate("/")}
           />
         ) : (
@@ -190,6 +337,46 @@ export function AudioRoom() {
   return (
     <PageContainer>
       <div className="animate-slide-up">
+        {/* SDK error banner with reconnect — inline, doesn't replace page */}
+        {sdkError && (
+          <div className="mb-5 flex items-center justify-between gap-3 rounded-lg bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
+            <div className="flex items-center gap-3">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0 text-red-400">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="15" x2="9" y1="9" y2="15" />
+                <line x1="9" x2="15" y1="9" y2="15" />
+              </svg>
+              <p className="text-sm text-red-400">{sdkError}</p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={handleReconnect}>
+              Reconnect
+            </Button>
+          </div>
+        )}
+
+        {/* Connection warning after consecutive poll failures */}
+        {showConnectionWarning && (
+          <div className="mb-5 flex items-center gap-3 rounded-lg bg-yellow-500/10 px-4 py-3 ring-1 ring-yellow-500/20">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0 text-yellow-400">
+              <path d="M1 1l22 22" />
+              <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+              <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+              <path d="M10.71 5.05A16 16 0 0 1 22.56 9" />
+              <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+              <line x1="12" x2="12.01" y1="20" y2="20" />
+            </svg>
+            <p className="text-sm text-yellow-400">
+              Connection lost. Trying to reconnect...
+            </p>
+          </div>
+        )}
+
+        {/* Disconnect banner */}
+        {disconnectedName && (
+          <DisconnectBanner name={disconnectedName} />
+        )}
+
         {/* Two-column layout: Left = recording, Right = invite + participants */}
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
 
@@ -197,7 +384,7 @@ export function AudioRoom() {
           <div className="lg:col-span-8">
             <Card className="relative h-full overflow-hidden">
               {/* Recording pulse border */}
-              {daily.isRecording && (
+              {isRecording && (
                 <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-red-500/30 animate-pulse" />
               )}
 
@@ -212,8 +399,8 @@ export function AudioRoom() {
                 <Timer
                   formatted={timer.formatted}
                   progress={timer.progress}
-                  isRecording={daily.isRecording}
-                  isPaused={sessionState.status === "paused"}
+                  isRecording={isRecording}
+                  isPaused={isPaused}
                 />
 
                 {/* Mute button */}
@@ -225,15 +412,16 @@ export function AudioRoom() {
 
                 {/* Recording controls */}
                 <RecordingControls
-                  isRecording={daily.isRecording}
-                  isPaused={sessionState.status === "paused"}
-                  isHost={sessionState.isHost}
-                  isReadyToRecord={daily.participants.length >= 2}
+                  status={sessionState.status}
+                  isHost={isHost}
+                  canStartRecording={canStartRecording}
+                  canResume={canResume}
                   loading={apiLoading}
                   onStart={handleStart}
-                  onStop={handleStop}
+                  onEnd={handleEnd}
                   onPause={handlePause}
                   onResume={handleResume}
+                  onLeave={handleLeave}
                 />
               </div>
             </Card>
@@ -242,7 +430,7 @@ export function AudioRoom() {
           {/* ─── Right column: Invite + Participants + Info ─── */}
           <div className="flex flex-col gap-5 lg:col-span-4">
             {/* Guest invite link — host only */}
-            {sessionState.isHost && guestLink && (
+            {isHost && guestLink && (
               <Card variant="accent">
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-3">
@@ -291,9 +479,14 @@ export function AudioRoom() {
               </Card>
             )}
 
-            {/* Participants */}
+            {/* Participants — server-driven roster */}
             <Card>
-              <ParticipantStatus participants={daily.participants} />
+              <ParticipantStatus
+                participantsRoster={sessionState.participantsRoster}
+                activeParticipants={sessionState.activeParticipants}
+                sdkParticipants={daily.participants}
+                localUserId={daily.localUserId}
+              />
             </Card>
 
             {/* Session info */}
@@ -313,15 +506,18 @@ export function AudioRoom() {
                   <InfoRow
                     label="Status"
                     value={
-                      daily.isRecording
+                      isRecording
                         ? "Recording"
-                        : sessionState.status === "paused"
+                        : isPaused
                           ? "Paused"
                           : daily.isJoined
                             ? "Connected"
                             : "Connecting..."
                     }
                   />
+                  {sessionState.recordingSegments > 0 && (
+                    <InfoRow label="Segments" value={String(sessionState.recordingSegments)} />
+                  )}
                 </div>
               </div>
             </Card>
