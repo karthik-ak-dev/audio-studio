@@ -1,0 +1,133 @@
+# ──────────────────────────────────────────────
+# Audio Recording Platform — Local Development
+# ──────────────────────────────────────────────
+#
+# Usage:
+#   cp .env.example .env        # fill in DAILY_API_KEY
+#   docker compose up            # start everything
+#   docker compose up -d         # start in background
+#   docker compose down          # stop everything
+#   docker compose logs -f api   # tail API logs
+#
+# Services:
+#   dynamodb  — DynamoDB Local on port 8000
+#   dynamodb-admin — DynamoDB admin UI on port 8001
+#   dynamodb-setup — one-shot: creates the sessions table
+#   api       — FastAPI via uvicorn on port 3001
+#   web       — Vite dev server on port 5173
+
+services:
+
+  # ─── DynamoDB Local ──────────────────────────
+  dynamodb:
+    image: amazon/dynamodb-local
+    container_name: audio-dynamodb
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000/shell/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── DynamoDB Admin UI ───────────────────────
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin
+    container_name: audio-dynamodb-admin
+    ports:
+      - "8001:8001"
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb:8000
+      AWS_REGION: ap-south-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+
+  # ─── DynamoDB Table Setup (one-shot) ─────────
+  dynamodb-setup:
+    image: amazon/aws-cli
+    container_name: audio-dynamodb-setup
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: ap-south-1
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        aws dynamodb describe-table \
+          --table-name audio-sessions-dev \
+          --endpoint-url http://dynamodb:8000 2>/dev/null && \
+          echo "Table already exists" && exit 0
+
+        aws dynamodb create-table \
+          --table-name audio-sessions-dev \
+          --attribute-definitions \
+            AttributeName=session_id,AttributeType=S \
+            AttributeName=status,AttributeType=S \
+            AttributeName=created_at,AttributeType=S \
+            AttributeName=host_user_id,AttributeType=S \
+          --key-schema AttributeName=session_id,KeyType=HASH \
+          --global-secondary-indexes \
+            '[{"IndexName":"StatusIndex","KeySchema":[{"AttributeName":"status","KeyType":"HASH"},{"AttributeName":"created_at","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"HostUserIndex","KeySchema":[{"AttributeName":"host_user_id","KeyType":"HASH"},{"AttributeName":"created_at","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
+          --billing-mode PAY_PER_REQUEST \
+          --endpoint-url http://dynamodb:8000
+
+        echo "Table audio-sessions-dev created"
+
+  # ─── API (FastAPI + uvicorn) ─────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: audio-api
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./api/app:/app/app
+    environment:
+      SESSIONS_TABLE: audio-sessions-dev
+      RECORDINGS_BUCKET: auto-order-reports-prod
+      DAILY_API_KEY: ${DAILY_API_KEY}
+      DAILY_WEBHOOK_SECRET: ""
+      DAILY_DOMAIN: ak-kgen
+      ENVIRONMENT: dev
+      FRONTEND_ORIGIN: http://localhost:5173
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: ap-south-1
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:3001/health')\" || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── Web (Vite dev server) ───────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: audio-web
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web/src:/app/src
+      - ./web/public:/app/public
+      - ./web/index.html:/app/index.html
+      - ./web/tailwind.config.ts:/app/tailwind.config.ts
+      - ./web/postcss.config.js:/app/postcss.config.js
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001
+    depends_on:
+      api:
+        condition: service_healthy

@@ -1,15 +1,14 @@
 """DynamoDB data access layer for sessions — pure CRUD, no business logic."""
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import boto3
-from mypy_boto3_dynamodb.service_resource import Table
 
 from app.config import settings
 from app.constants import SessionStatus
 from app.models.session import Session
-from app.utils.time import now_iso, compute_ttl
+from app.utils.time import now_iso
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -17,7 +16,7 @@ dynamodb = boto3.resource(
     "dynamodb",
     **({"endpoint_url": settings.dynamodb_endpoint} if settings.dynamodb_endpoint else {}),
 )
-table: Table = dynamodb.Table(settings.sessions_table)
+table: Any = dynamodb.Table(settings.sessions_table)
 
 
 def create(session: Session) -> Session:
