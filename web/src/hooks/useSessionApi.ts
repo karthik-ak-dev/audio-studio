@@ -7,6 +7,9 @@ interface UseSessionApiReturn {
   error: string | null;
   createSession: (data: CreateSessionRequest) => Promise<CreateSessionResponse | null>;
   getSession: (sessionId: string) => Promise<Session | null>;
+  joinSession: (sessionId: string) => Promise<void>;
+  leaveSession: (sessionId: string) => Promise<void>;
+  startRecording: (sessionId: string) => Promise<boolean>;
   stopSession: (sessionId: string) => Promise<boolean>;
   pauseSession: (sessionId: string) => Promise<boolean>;
   resumeSession: (sessionId: string) => Promise<boolean>;
@@ -56,6 +59,46 @@ export function useSessionApi(): UseSessionApiReturn {
         return await api.getSession(sessionId);
       } catch (err) {
         return handleError(err);
+      } finally {
+        if (mountedRef.current) setLoading(false);
+      }
+    },
+    [handleError],
+  );
+
+  // Fire-and-forget: notify server of join/leave without blocking UI
+  const joinSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      try {
+        await api.joinSession(sessionId);
+      } catch (err) {
+        console.warn("Failed to notify server of join:", err);
+      }
+    },
+    [],
+  );
+
+  const leaveSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      try {
+        await api.leaveSession(sessionId);
+      } catch (err) {
+        console.warn("Failed to notify server of leave:", err);
+      }
+    },
+    [],
+  );
+
+  const startRecording = useCallback(
+    async (sessionId: string): Promise<boolean> => {
+      setLoading(true);
+      setError(null);
+      try {
+        await api.startRecording(sessionId);
+        return true;
+      } catch (err) {
+        handleError(err);
+        return false;
       } finally {
         if (mountedRef.current) setLoading(false);
       }
@@ -119,6 +162,9 @@ export function useSessionApi(): UseSessionApiReturn {
     error,
     createSession,
     getSession,
+    joinSession,
+    leaveSession,
+    startRecording,
     stopSession,
     pauseSession,
     resumeSession,

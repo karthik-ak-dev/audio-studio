@@ -53,6 +53,24 @@ export const api = {
     return request<Session>(`/sessions/${sessionId}`);
   },
 
+  joinSession(sessionId: string): Promise<SessionActionResponse> {
+    return request<SessionActionResponse>(`/sessions/${sessionId}/join`, {
+      method: "POST",
+    });
+  },
+
+  leaveSession(sessionId: string): Promise<SessionActionResponse> {
+    return request<SessionActionResponse>(`/sessions/${sessionId}/leave`, {
+      method: "POST",
+    });
+  },
+
+  startRecording(sessionId: string): Promise<SessionActionResponse> {
+    return request<SessionActionResponse>(`/sessions/${sessionId}/start`, {
+      method: "POST",
+    });
+  },
+
   stopSession(sessionId: string): Promise<SessionActionResponse> {
     return request<SessionActionResponse>(`/sessions/${sessionId}/stop`, {
       method: "POST",

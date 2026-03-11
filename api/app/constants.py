@@ -14,6 +14,21 @@ class SessionStatus(StrEnum):
     ERROR = "error"
 
 
+# Status priority — higher number = further in lifecycle. Used to prevent
+# stale webhooks from regressing state (e.g. a delayed "recording.started"
+# arriving after the FE already moved the session to "processing").
+STATUS_PRIORITY: dict[str, int] = {
+    SessionStatus.CREATED: 0,
+    SessionStatus.WAITING_FOR_GUEST: 1,
+    SessionStatus.RECORDING: 2,
+    SessionStatus.PAUSED: 2,       # Same level as recording (lateral move)
+    SessionStatus.STOPPING: 3,
+    SessionStatus.PROCESSING: 4,
+    SessionStatus.COMPLETED: 5,
+    SessionStatus.ERROR: 5,        # Terminal state, same level as completed
+}
+
+
 # Daily.co room configuration
 MAX_PARTICIPANTS: int = 2
 ROOM_EXPIRY_BUFFER_SEC: int = 7200

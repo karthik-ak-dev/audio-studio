@@ -20,7 +20,7 @@ export function AudioRoom() {
   const navigate = useNavigate();
   const sessionState = useSessionState();
   const dispatch = useSessionDispatch();
-  const { loading: apiLoading, getSession, stopSession, pauseSession, resumeSession } = useSessionApi();
+  const { loading: apiLoading, getSession, joinSession, leaveSession, startRecording, stopSession, pauseSession, resumeSession } = useSessionApi();
 
   const [guestLink, setGuestLink] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
@@ -55,9 +55,10 @@ export function AudioRoom() {
 
   const handleLeft = useCallback(() => {
     if (sessionId) {
+      void leaveSession(sessionId);
       navigate(`/session/${sessionId}/complete`);
     }
-  }, [sessionId, navigate]);
+  }, [sessionId, navigate, leaveSession]);
 
   const handleError = useCallback(
     (error: string) => {
@@ -82,6 +83,13 @@ export function AudioRoom() {
     }
   }, [roomUrl, token, daily.isJoined, daily.join]);
 
+  // Notify server when we join the Daily room
+  useEffect(() => {
+    if (daily.isJoined && sessionId) {
+      void joinSession(sessionId);
+    }
+  }, [daily.isJoined, sessionId, joinSession]);
+
   // Sync recording state with timer
   useEffect(() => {
     if (daily.isRecording) {
@@ -91,11 +99,21 @@ export function AudioRoom() {
     }
   }, [daily.isRecording, timer.start, timer.stop]);
 
+  const handleStart = async () => {
+    if (!sessionId) return;
+    const success = await startRecording(sessionId);
+    if (success) {
+      dispatch({ type: "STATUS_UPDATED", payload: { status: "recording" } });
+      timer.start();
+    }
+  };
+
   const handleStop = async () => {
     if (!sessionId) return;
     const success = await stopSession(sessionId);
     if (success) {
-      dispatch({ type: "STATUS_UPDATED", payload: { status: "stopping" } });
+      dispatch({ type: "STATUS_UPDATED", payload: { status: "processing" } });
+      navigate(`/session/${sessionId}/complete`);
     }
   };
 
@@ -192,7 +210,9 @@ export function AudioRoom() {
             isRecording={daily.isRecording}
             isPaused={sessionState.status === "paused"}
             isHost={sessionState.isHost}
+            isReadyToRecord={daily.participants.length >= 2}
             loading={apiLoading}
+            onStart={handleStart}
             onStop={handleStop}
             onPause={handlePause}
             onResume={handleResume}

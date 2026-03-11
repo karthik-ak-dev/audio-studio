@@ -4,7 +4,9 @@ interface RecordingControlsProps {
   isRecording: boolean;
   isPaused: boolean;
   isHost: boolean;
+  isReadyToRecord: boolean;
   loading: boolean;
+  onStart: () => void;
   onStop: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -14,7 +16,9 @@ export function RecordingControls({
   isRecording,
   isPaused,
   isHost,
+  isReadyToRecord,
   loading,
+  onStart,
   onStop,
   onPause,
   onResume,
@@ -23,16 +27,40 @@ export function RecordingControls({
     return (
       <div className="text-center">
         <span className="text-xs text-text-muted">
-          {isRecording ? "Recording in progress — host controls recording" : "Waiting for host to manage recording"}
+          {isRecording
+            ? "Recording in progress — host controls recording"
+            : "Waiting for host to start recording"}
         </span>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center justify-center gap-3">
-      {isRecording && (
+    <div className="flex flex-col items-center gap-3">
+      {/* Pre-recording: host can start */}
+      {!isRecording && !isPaused && (
         <>
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={onStart}
+            loading={loading}
+            disabled={!isReadyToRecord}
+            className="w-full max-w-[200px]"
+          >
+            Start Recording
+          </Button>
+          {!isReadyToRecord && (
+            <span className="text-xs text-text-muted">
+              Waiting for guest to join...
+            </span>
+          )}
+        </>
+      )}
+
+      {/* Recording: pause or stop */}
+      {isRecording && (
+        <div className="flex items-center gap-3">
           <Button
             variant="secondary"
             size="sm"
@@ -49,11 +77,12 @@ export function RecordingControls({
           >
             Stop Recording
           </Button>
-        </>
+        </div>
       )}
 
+      {/* Paused: resume or end */}
       {isPaused && (
-        <>
+        <div className="flex items-center gap-3">
           <Button
             variant="primary"
             size="sm"
@@ -70,7 +99,7 @@ export function RecordingControls({
           >
             End Session
           </Button>
-        </>
+        </div>
       )}
     </div>
   );
