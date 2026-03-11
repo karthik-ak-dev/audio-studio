@@ -297,7 +297,7 @@ def _can_transition(current: SessionStatus, target: SessionStatus) -> bool:
     return STATUS_PRIORITY.get(target, 0) >= STATUS_PRIORITY.get(current, 0)
 
 
-async def on_participant_joined(session_id: str, room_name: str) -> None:
+async def on_participant_joined(session_id: str, _room_name: str) -> None:
     """Webhook: participant.joined — RECONCILIATION.
 
     Only acts if session is still in 'created' or 'waiting_for_guest' status,
@@ -310,7 +310,10 @@ async def on_participant_joined(session_id: str, room_name: str) -> None:
         return
 
     if not _can_transition(session.status, SessionStatus.READY):
-        logger.info("Webhook skipped: participant.joined for %s (status=%s already ahead)", session_id, session.status)
+        logger.info(
+            "Webhook skipped: participant.joined for %s (status=%s already ahead)",
+            session_id, session.status,
+        )
         return
 
     count: int = session_repo.increment_participant_count(session_id, 1)
@@ -339,7 +342,10 @@ async def on_participant_left(session_id: str, room_name: str) -> None:
 
     # Auto-stop recording if participant left mid-recording (safety net for browser crash)
     if count < 2 and session.status == SessionStatus.RECORDING:
-        logger.info("Webhook safety net: participant left during recording — stopping: %s", session_id)
+        logger.info(
+            "Webhook safety net: participant left during recording — stopping: %s",
+            session_id,
+        )
         await daily_client.stop_recording(room_name)
         session_repo.update_status(
             session_id, SessionStatus.PROCESSING, recording_stopped_at=now_iso()
@@ -364,7 +370,10 @@ def on_recording_started(session_id: str, start_ts: str) -> None:
         return
 
     if not _can_transition(session.status, SessionStatus.RECORDING):
-        logger.info("Webhook skipped: recording.started for %s (status=%s already ahead)", session_id, session.status)
+        logger.info(
+            "Webhook skipped: recording.started for %s (status=%s already ahead)",
+            session_id, session.status,
+        )
         return
 
     if not session.recording_started_at:
@@ -387,7 +396,10 @@ def on_recording_stopped(session_id: str, timestamp: str) -> None:
         return
 
     if not _can_transition(session.status, SessionStatus.PROCESSING):
-        logger.info("Webhook skipped: recording.stopped for %s (status=%s already ahead)", session_id, session.status)
+        logger.info(
+            "Webhook skipped: recording.stopped for %s (status=%s already ahead)",
+            session_id, session.status,
+        )
         return
 
     session_repo.update_status(
@@ -439,12 +451,16 @@ def _to_session_response(session: Session) -> SessionResponse:
 
 
 class SessionNotFoundError(Exception):
+    """Raised when a session_id does not exist in DynamoDB."""
+
     def __init__(self, session_id: str) -> None:
         self.session_id: str = session_id
         super().__init__(f"Session not found: {session_id}")
 
 
 class InvalidSessionStateError(Exception):
+    """Raised when an action is attempted on a session in an incompatible status."""
+
     def __init__(self, session_id: str, current_status: SessionStatus, action: str) -> None:
         self.session_id: str = session_id
         self.current_status: SessionStatus = current_status

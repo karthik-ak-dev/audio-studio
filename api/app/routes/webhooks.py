@@ -95,7 +95,10 @@ async def daily_webhook(request: Request) -> dict[str, str]:
     room_name: str = str(payload.get("room", ""))
     session_id: str = _extract_session_id(room_name)
 
-    logger.info("Webhook received: %s | room=%s | session=%s", event_type, room_name, session_id)
+    logger.info(
+        "Webhook received: %s | room=%s | session=%s",
+        event_type, room_name, session_id,
+    )
 
     # Dispatch to service layer — each handler has its own guard logic
     if event_type == "participant.joined":
@@ -103,10 +106,13 @@ async def daily_webhook(request: Request) -> dict[str, str]:
     elif event_type == "participant.left":
         await session_service.on_participant_left(session_id, room_name)
     elif event_type == "recording.started":
-        session_service.on_recording_started(session_id, str(payload.get("start_ts", "")))
+        start_ts = str(payload.get("start_ts", ""))
+        session_service.on_recording_started(session_id, start_ts)
     elif event_type == "recording.stopped":
-        session_service.on_recording_stopped(session_id, str(payload.get("timestamp", "")))
+        stopped_ts = str(payload.get("timestamp", ""))
+        session_service.on_recording_stopped(session_id, stopped_ts)
     elif event_type == "recording.error":
-        session_service.on_recording_error(session_id, str(payload.get("error", "Unknown recording error")))
+        error_msg = str(payload.get("error", "Unknown error"))
+        session_service.on_recording_error(session_id, error_msg)
 
     return {"status": "ok"}
