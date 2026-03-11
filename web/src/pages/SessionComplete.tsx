@@ -64,7 +64,7 @@ export function SessionComplete() {
   if (error) {
     return (
       <PageContainer>
-        <ErrorState message={error} />
+        <ErrorState message={error} centered />
       </PageContainer>
     );
   }

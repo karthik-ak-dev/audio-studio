@@ -9,6 +9,7 @@ import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
 
 const STORAGE_PREFIX = "audio-studio:";
+const TERMINAL_STATUSES = new Set(["processing", "completed", "error"]);
 
 export function JoinSession() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -30,6 +31,11 @@ export function JoinSession() {
     const loadSession = async () => {
       const session = await getSession(sessionId);
       if (session) {
+        // If session is already finished, redirect to complete page
+        if (TERMINAL_STATUSES.has(session.status)) {
+          navigate(`/session/${sessionId}/complete`, { replace: true });
+          return;
+        }
         setHostName(session.host_name);
         setGuestName(session.guest_name);
         setRoomUrl(session.daily_room_url ?? "");
@@ -38,7 +44,7 @@ export function JoinSession() {
     };
 
     void loadSession();
-  }, [sessionId, getSession]);
+  }, [sessionId, getSession, navigate]);
 
   const handleJoin = () => {
     if (!sessionId || !token) return;
@@ -81,6 +87,7 @@ export function JoinSession() {
           title="Session Not Found"
           message={error}
           onRetry={() => navigate("/")}
+          centered
         />
       </PageContainer>
     );
@@ -92,6 +99,7 @@ export function JoinSession() {
         <ErrorState
           title="Invalid Link"
           message="This join link is missing the required token. Ask the host for a new link."
+          centered
         />
       </PageContainer>
     );

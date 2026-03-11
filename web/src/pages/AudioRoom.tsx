@@ -44,6 +44,7 @@ export function AudioRoom() {
   const [guestLink, setGuestLink] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
   const [initialized, setInitialized] = useState<boolean>(false);
+  const [initError, setInitError] = useState<{ title: string; message: string } | null>(null);
   const [pollFailCount, setPollFailCount] = useState<number>(0);
   const [sdkError, setSdkError] = useState<string | null>(null);
   const joinNotifiedRef = useRef<boolean>(false);
@@ -119,12 +120,23 @@ export function AudioRoom() {
     void daily.join();
   }, [daily]);
 
-  // ─── 1. Initialize: load session from server, read token from sessionStorage ───
+  // ─── 1. Initialize: load session, resolve token, route to correct view ───
+  //
+  // Entry scenarios:
+  //   A. Context already has token (just created/joined → navigated here)
+  //   B. sessionStorage has token (page refresh while in session)
+  //   C. No token — user pasted URL or bookmark
+  //
+  // Session states on load:
+  //   - Active (created/waiting/ready/recording/paused): need token to join Daily
+  //   - Terminal (processing/completed/error): redirect to /complete
+  //   - Not found (404): show error
+  //
   useEffect(() => {
     if (!sessionId || initialized) return;
 
     const init = async () => {
-      // Try context first (just created or just joined)
+      // ── A. Token in React context (fresh create/join navigation) ──
       if (sessionState.sessionId === sessionId && sessionState.roomUrl && sessionState.token) {
         if (sessionState.guestJoinUrl) {
           setGuestLink(sessionState.guestJoinUrl);
@@ -133,7 +145,7 @@ export function AudioRoom() {
         if (session) {
           dispatch({ type: "SESSION_SYNCED", payload: { session } });
           if (TERMINAL_STATUSES.has(session.status)) {
-            navigate(`/session/${sessionId}/complete`);
+            navigate(`/session/${sessionId}/complete`, { replace: true });
             return;
           }
         }
@@ -141,30 +153,42 @@ export function AudioRoom() {
         return;
       }
 
-      // Read token from sessionStorage (refresh scenario)
-      const stored = sessionStorage.getItem(`${STORAGE_PREFIX}${sessionId}`);
-      if (!stored) {
-        navigate("/");
+      // ── B & C. Need to fetch session first to decide routing ──
+      const session = await getSession(sessionId);
+
+      // Session not found (404) — show inline error, don't silently redirect
+      if (!session) {
+        setInitError({
+          title: "Session Not Found",
+          message: "This session doesn't exist or has expired.",
+        });
         return;
       }
 
+      // Terminal state — always redirect to /complete (works with or without token)
+      if (TERMINAL_STATUSES.has(session.status)) {
+        navigate(`/session/${sessionId}/complete`, { replace: true });
+        return;
+      }
+
+      // ── Active session — need a token to join ──
+      const stored = sessionStorage.getItem(`${STORAGE_PREFIX}${sessionId}`);
+      if (!stored) {
+        // No token for an active session — user can't join without an invite link
+        setInitError({
+          title: "Session In Progress",
+          message: "This session is currently active. You need an invite link from the host to join.",
+        });
+        return;
+      }
+
+      // ── B. Restore from sessionStorage (refresh) ──
       const { token: storedToken, isHost: storedIsHost, roomUrl: storedRoomUrl, guestJoinUrl: storedGuestJoinUrl } = JSON.parse(stored) as {
         token: string;
         isHost: boolean;
         roomUrl: string;
         guestJoinUrl?: string;
       };
-
-      const session = await getSession(sessionId);
-      if (!session) {
-        navigate("/");
-        return;
-      }
-
-      if (TERMINAL_STATUSES.has(session.status)) {
-        navigate(`/session/${sessionId}/complete`);
-        return;
-      }
 
       dispatch({
         type: "SESSION_LOADED",
@@ -356,7 +380,20 @@ export function AudioRoom() {
     return null;
   })();
 
-  // ─── Loading / fatal error state ───
+  // ─── Loading / error state ───
+  if (initError) {
+    return (
+      <PageContainer>
+        <ErrorState
+          title={initError.title}
+          message={initError.message}
+          onRetry={() => navigate("/")}
+          centered
+        />
+      </PageContainer>
+    );
+  }
+
   if (!initialized || (!roomUrl && !sessionState.error)) {
     return (
       <PageContainer>
@@ -364,6 +401,7 @@ export function AudioRoom() {
           <ErrorState
             message={sessionState.error}
             onRetry={() => navigate("/")}
+            centered
           />
         ) : (
           <PageLoader />

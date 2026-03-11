@@ -5,14 +5,16 @@ interface ErrorStateProps {
   title?: string;
   message: string;
   onRetry?: () => void;
+  centered?: boolean;
 }
 
 export function ErrorState({
   title = "Something went wrong",
   message,
   onRetry,
+  centered = false,
 }: ErrorStateProps) {
-  return (
+  const card = (
     <Card variant="default" className="mx-auto max-w-md text-center">
       <div className="flex flex-col items-center gap-4 py-8">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10">
@@ -42,4 +44,14 @@ export function ErrorState({
       </div>
     </Card>
   );
+
+  if (centered) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        {card}
+      </div>
+    );
+  }
+
+  return card;
 }
