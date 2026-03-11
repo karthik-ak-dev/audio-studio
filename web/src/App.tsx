@@ -11,9 +11,9 @@ export function App() {
   return (
     <BrowserRouter>
       <SessionProvider>
-        <div className="flex min-h-screen flex-col">
+        <div className="flex flex-col">
           <Navbar />
-          <div className="flex-1">
+          <div className="min-h-screen">
             <Routes>
               <Route path="/" element={<CreateSession />} />
               <Route path="/join/:sessionId" element={<JoinSession />} />

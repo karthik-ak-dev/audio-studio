@@ -133,18 +133,28 @@ export function CreateSession() {
 
         {/* Feature hints */}
         <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-          {[
-            { icon: "M19 10v2a7 7 0 0 1-14 0v-2", label: "Audio-only" },
-            { icon: "M12 6v6l4 2", label: "Up to 1 hour" },
-            { icon: "M9 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m6 16h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4", label: "Separate tracks" },
-          ].map((item) => (
-            <div key={item.label} className="flex items-center gap-1.5 text-text-muted">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                <path d={item.icon} />
-              </svg>
-              <span className="text-xs">{item.label}</span>
-            </div>
-          ))}
+          <div className="flex items-center gap-1.5 text-text-muted">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" x2="12" y1="19" y2="22" />
+            </svg>
+            <span className="text-xs">Audio-only</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-text-muted">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <span className="text-xs">Up to 1 hour</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-text-muted">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              <rect x="1" y="4" width="8" height="16" rx="1" />
+              <rect x="15" y="4" width="8" height="16" rx="1" />
+            </svg>
+            <span className="text-xs">Separate tracks</span>
+          </div>
         </div>
       </div>
     </PageContainer>

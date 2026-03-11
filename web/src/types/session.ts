@@ -1,5 +1,6 @@
 export type SessionStatus =
   | "created"
+  | "waiting_for_guest"
   | "ready"
   | "recording"
   | "paused"

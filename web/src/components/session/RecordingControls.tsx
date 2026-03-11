@@ -31,7 +31,7 @@ export function RecordingControls({
 
   const isRecording = status === "recording";
   const isPaused = status === "paused";
-  const isReady = status === "ready" || status === "created";
+  const isReady = status === "ready" || status === "created" || status === "waiting_for_guest" || status === null;
 
   // Guest view — status indicator only
   if (!isHost) {

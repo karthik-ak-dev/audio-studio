@@ -252,7 +252,7 @@ export function AudioRoom() {
       if (!timer.isRunning) timer.start();
     } else if (sessionState.status === "paused") {
       timer.stop();
-    } else if (sessionState.status === "ready" || sessionState.status === "created") {
+    } else if (sessionState.status === "ready" || sessionState.status === "created" || sessionState.status === "waiting_for_guest") {
       timer.reset();
     }
   }, [sessionState.status, sessionState.recordingStartedAt, timer]);
@@ -303,8 +303,7 @@ export function AudioRoom() {
   // ─── Derived state from server ───
   const isRecording = sessionState.status === "recording";
   const isPaused = sessionState.status === "paused";
-  const isReady = sessionState.status === "ready";
-  const canStartRecording = isReady && sessionState.participantCount >= 2;
+  const canStartRecording = sessionState.status === "ready" && sessionState.participantCount >= 2;
   const canResume = isPaused && sessionState.participantCount >= 2;
   const showConnectionWarning = pollFailCount >= POLL_FAIL_THRESHOLD;
 

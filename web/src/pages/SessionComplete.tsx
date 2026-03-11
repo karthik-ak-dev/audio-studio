@@ -12,6 +12,7 @@ import type { Session, SessionStatus } from "@/types/session";
 
 const statusBadgeVariant: Record<SessionStatus, "accent" | "warning" | "error" | "neutral"> = {
   created: "neutral",
+  waiting_for_guest: "neutral",
   ready: "neutral",
   recording: "accent",
   paused: "warning",
@@ -22,6 +23,7 @@ const statusBadgeVariant: Record<SessionStatus, "accent" | "warning" | "error" |
 
 const statusLabel: Record<SessionStatus, string> = {
   created: "Created",
+  waiting_for_guest: "Waiting",
   ready: "Ready",
   recording: "Recording",
   paused: "Paused",
