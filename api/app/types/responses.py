@@ -19,6 +19,7 @@ class SessionResponse(BaseModel):
     host_user_id: str
     host_name: str
     guest_name: str
+    daily_room_url: Optional[str] = None
     participant_count: int
     recording_segments: int
     recording_started_at: Optional[str] = None

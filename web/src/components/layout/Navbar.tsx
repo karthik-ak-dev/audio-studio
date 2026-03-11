@@ -3,12 +3,12 @@ import { Link } from "react-router-dom";
 export function Navbar() {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 glass-elevated">
-      <nav className="mx-auto flex max-w-container items-center justify-between px-5 py-4 md:px-8">
+      <nav className="mx-auto flex max-w-container items-center justify-between px-5 py-3.5 md:px-8">
         <Link
           to="/"
-          className="flex items-center gap-2 transition-opacity hover:opacity-80"
+          className="flex items-center gap-2.5 transition-opacity hover:opacity-80"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent shadow-glow-sm">
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -28,14 +28,16 @@ export function Navbar() {
           </span>
         </Link>
 
-        <div className="flex items-center gap-3">
-          <Link
-            to="/"
-            className="rounded-sm px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-text-muted transition-colors hover:text-text"
-          >
-            New Session
-          </Link>
-        </div>
+        <Link
+          to="/"
+          className="flex items-center gap-1.5 rounded-md bg-white/[0.04] px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-text-muted ring-1 ring-white/[0.06] transition-all hover:bg-white/[0.08] hover:text-text"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+            <line x1="12" x2="12" y1="5" y2="19" />
+            <line x1="5" x2="19" y1="12" y2="12" />
+          </svg>
+          New Session
+        </Link>
       </nav>
     </header>
   );

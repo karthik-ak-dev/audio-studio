@@ -6,53 +6,58 @@ interface MuteButtonProps {
 
 export function MuteButton({ isMuted, onToggle, disabled = false }: MuteButtonProps) {
   return (
-    <button
-      onClick={onToggle}
-      disabled={disabled}
-      className={`
-        flex h-14 w-14 items-center justify-center rounded-full
-        transition-all duration-200 ease-out
-        cursor-pointer disabled:cursor-not-allowed disabled:opacity-50
-        ${
-          isMuted
-            ? "bg-red-500/20 border border-red-500/40 hover:bg-red-500/30"
-            : "glass hover:bg-white/[0.08]"
-        }
-      `}
-      aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
-    >
-      {isMuted ? (
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="h-5 w-5 text-red-400"
-        >
-          <line x1="2" x2="22" y1="2" y2="22" />
-          <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" />
-          <path d="M5 10v2a7 7 0 0 0 12 5" />
-          <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" />
-          <path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
-          <line x1="12" x2="12" y1="19" y2="22" />
-        </svg>
-      ) : (
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="h-5 w-5 text-accent"
-        >
-          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-          <line x1="12" x2="12" y1="19" y2="22" />
-        </svg>
-      )}
-    </button>
+    <div className="flex flex-col items-center gap-2">
+      <button
+        onClick={onToggle}
+        disabled={disabled}
+        className={`
+          flex h-16 w-16 items-center justify-center rounded-full
+          transition-all duration-200 ease-out
+          cursor-pointer disabled:cursor-not-allowed disabled:opacity-50
+          ${
+            isMuted
+              ? "bg-red-500/20 ring-2 ring-red-500/40 hover:bg-red-500/30 hover:ring-red-500/50"
+              : "glass ring-1 ring-white/10 hover:bg-white/[0.08] hover:ring-accent/30"
+          }
+        `}
+        aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+      >
+        {isMuted ? (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-6 w-6 text-red-400"
+          >
+            <line x1="2" x2="22" y1="2" y2="22" />
+            <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" />
+            <path d="M5 10v2a7 7 0 0 0 12 5" />
+            <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" />
+            <path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
+            <line x1="12" x2="12" y1="19" y2="22" />
+          </svg>
+        ) : (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-6 w-6 text-accent"
+          >
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" x2="12" y1="19" y2="22" />
+          </svg>
+        )}
+      </button>
+      <span className={`text-[10px] font-semibold uppercase tracking-wider ${isMuted ? "text-red-400" : "text-text-muted"}`}>
+        {isMuted ? "Muted" : "Microphone on"}
+      </span>
+    </div>
   );
 }

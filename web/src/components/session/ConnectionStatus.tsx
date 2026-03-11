@@ -15,7 +15,7 @@ export function ConnectionStatus({ quality }: ConnectionStatusProps) {
   const config = qualityConfig[quality];
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 rounded-md bg-white/[0.03] px-2.5 py-1.5 ring-1 ring-white/[0.06]">
       <div className="flex items-end gap-[2px]">
         {[1, 2, 3].map((bar) => (
           <div
@@ -24,7 +24,7 @@ export function ConnectionStatus({ quality }: ConnectionStatusProps) {
               w-[3px] rounded-full transition-colors duration-300
               ${bar <= config.bars ? config.color : "bg-white/10"}
             `}
-            style={{ height: `${bar * 5 + 3}px` }}
+            style={{ height: `${bar * 4 + 4}px` }}
           />
         ))}
       </div>

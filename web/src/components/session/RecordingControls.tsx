@@ -23,22 +23,42 @@ export function RecordingControls({
   onPause,
   onResume,
 }: RecordingControlsProps) {
+  // Derive the actual recording state — isPaused takes priority over isRecording
+  // because our session status is the source of truth (Daily SDK may lag behind)
+  const activelyRecording = isRecording && !isPaused;
+  const notStarted = !isRecording && !isPaused;
+
   if (!isHost) {
     return (
-      <div className="text-center">
-        <span className="text-xs text-text-muted">
-          {isRecording
-            ? "Recording in progress — host controls recording"
-            : "Waiting for host to start recording"}
+      <div className="flex items-center gap-2 rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
+        {isPaused ? (
+          <span className="inline-flex h-3 w-3 rounded-sm bg-yellow-400/80" />
+        ) : activelyRecording ? (
+          <span className="relative flex h-3 w-3">
+            <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-red-500" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+          </span>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-text-muted">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v4l3 3" />
+          </svg>
+        )}
+        <span className={`text-xs ${isPaused ? "text-yellow-400" : activelyRecording ? "text-red-400" : "text-text-muted"}`}>
+          {isPaused
+            ? "Recording paused by host"
+            : activelyRecording
+              ? "Recording in progress"
+              : "Waiting for host to start recording"}
         </span>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex w-full flex-col items-center gap-3">
       {/* Pre-recording: host can start */}
-      {!isRecording && !isPaused && (
+      {notStarted && (
         <>
           <Button
             variant="primary"
@@ -46,24 +66,27 @@ export function RecordingControls({
             onClick={onStart}
             loading={loading}
             disabled={!isReadyToRecord}
-            className="w-full max-w-[200px]"
+            className="w-full max-w-[240px]"
           >
             Start Recording
           </Button>
           {!isReadyToRecord && (
-            <span className="text-xs text-text-muted">
-              Waiting for guest to join...
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 animate-blink rounded-full bg-text-muted/40" />
+              <span className="text-xs text-text-muted">
+                Waiting for guest to join...
+              </span>
+            </div>
           )}
         </>
       )}
 
       {/* Recording: pause or stop */}
-      {isRecording && (
+      {activelyRecording && (
         <div className="flex items-center gap-3">
           <Button
             variant="secondary"
-            size="sm"
+            size="md"
             onClick={onPause}
             loading={loading}
           >
@@ -71,7 +94,7 @@ export function RecordingControls({
           </Button>
           <Button
             variant="danger"
-            size="sm"
+            size="md"
             onClick={onStop}
             loading={loading}
           >
@@ -85,7 +108,7 @@ export function RecordingControls({
         <div className="flex items-center gap-3">
           <Button
             variant="primary"
-            size="sm"
+            size="md"
             onClick={onResume}
             loading={loading}
           >
@@ -93,7 +116,7 @@ export function RecordingControls({
           </Button>
           <Button
             variant="danger"
-            size="sm"
+            size="md"
             onClick={onStop}
             loading={loading}
           >

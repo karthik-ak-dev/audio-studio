@@ -18,6 +18,7 @@ export function JoinSession() {
   const [sessionLoaded, setSessionLoaded] = useState<boolean>(false);
   const [hostName, setHostName] = useState<string>("");
   const [guestName, setGuestName] = useState<string>("");
+  const [roomUrl, setRoomUrl] = useState<string>("");
 
   const token = searchParams.get("t");
 
@@ -29,6 +30,7 @@ export function JoinSession() {
       if (session) {
         setHostName(session.host_name);
         setGuestName(session.guest_name);
+        setRoomUrl(session.daily_room_url ?? "");
         setSessionLoaded(true);
       }
     };
@@ -43,7 +45,7 @@ export function JoinSession() {
       type: "SESSION_JOINED",
       payload: {
         sessionId,
-        roomUrl: "", // Will be resolved from session
+        roomUrl,
         token,
         hostName,
         guestName,
@@ -86,36 +88,79 @@ export function JoinSession() {
 
   return (
     <PageContainer>
-      <div className="mx-auto max-w-md animate-slide-up">
-        <div className="mb-8 text-center">
+      <div className="mx-auto max-w-lg animate-slide-up">
+        {/* Header */}
+        <div className="mb-10 text-center">
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 ring-1 ring-accent/20">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-7 w-7 text-accent"
+            >
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <line x1="19" x2="19" y1="8" y2="14" />
+              <line x1="22" x2="16" y1="11" y2="11" />
+            </svg>
+          </div>
           <h1 className="text-3xl font-black tracking-tight text-text md:text-4xl">
             Join <span className="text-gradient-accent">Session</span>
           </h1>
-          <p className="mt-2 text-sm text-text-muted">
-            You&apos;ve been invited to an audio recording session
+          <p className="mt-3 text-sm text-text-muted">
+            You've been invited to an audio recording session
           </p>
         </div>
 
         <Card>
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-6">
+            {/* Session details */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between rounded-md bg-white/[0.03] px-4 py-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-                  Host
-                </span>
-                <span className="text-sm font-medium text-text">{hostName}</span>
+              <div className="flex items-center gap-3 rounded-md bg-white/[0.03] px-4 py-3.5 ring-1 ring-white/[0.06]">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-accent">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                    Host
+                  </span>
+                  <span className="text-sm font-medium text-text">{hostName}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between rounded-md bg-white/[0.03] px-4 py-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-                  Guest
-                </span>
-                <span className="text-sm font-medium text-text">{guestName}</span>
+
+              <div className="flex items-center gap-3 rounded-md bg-white/[0.03] px-4 py-3.5 ring-1 ring-white/[0.06]">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-accent">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <line x1="19" x2="19" y1="8" y2="14" />
+                    <line x1="22" x2="16" y1="11" y2="11" />
+                  </svg>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                    You're joining as
+                  </span>
+                  <span className="text-sm font-medium text-text">{guestName}</span>
+                </div>
               </div>
             </div>
 
-            <div className="rounded-md bg-accent/[0.06] px-4 py-3 text-center">
+            {/* Info banner */}
+            <div className="flex items-center gap-3 rounded-md bg-accent/[0.06] px-4 py-3 ring-1 ring-accent/10">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-accent/60">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" x2="12" y1="19" y2="22" />
+              </svg>
               <p className="text-xs text-text-muted">
-                Audio-only &middot; Your microphone will be used &middot; Up to 1 hour
+                Audio-only session &middot; Your microphone will be used &middot; Up to 1 hour
               </p>
             </div>
 

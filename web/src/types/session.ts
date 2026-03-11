@@ -28,6 +28,7 @@ export interface Session {
   host_user_id: string;
   host_name: string;
   guest_name: string;
+  daily_room_url: string | null;
   participant_count: number;
   recording_segments: number;
   recording_started_at: string | null;

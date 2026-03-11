@@ -26,6 +26,7 @@ Session lifecycle:
 import uuid
 import logging
 
+from app.config import settings
 from app.constants import SessionStatus, SESSION_ID_LENGTH, STATUS_PRIORITY
 from app.models.session import Session
 from app.repos import session_repo
@@ -100,7 +101,7 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
         room_url=room_url,
         host_token=host_token,
         guest_token=guest_token,
-        guest_join_url=f"{room_url}?t={guest_token}",
+        guest_join_url=f"{settings.frontend_origin}/join/{session_id}?t={guest_token}",
     )
 
 
@@ -217,7 +218,9 @@ async def stop_session(session_id: str) -> SessionActionResponse:
     if session.status not in (SessionStatus.RECORDING, SessionStatus.PAUSED):
         raise InvalidSessionStateError(session_id, session.status, "stop")
 
-    await daily_client.stop_recording(session.daily_room_name)
+    # Only call Daily.co stop if actively recording (pause already stopped it)
+    if session.status == SessionStatus.RECORDING:
+        await daily_client.stop_recording(session.daily_room_name)
     session_repo.update_status(
         session_id,
         SessionStatus.PROCESSING,
@@ -242,10 +245,11 @@ async def leave_session(session_id: str) -> SessionActionResponse:
 
     count: int = session_repo.increment_participant_count(session_id, -1)
 
-    # Edge case: participant left while recording was active → auto-stop
-    if count < 2 and session.status == SessionStatus.RECORDING:
-        logger.info("Participant left during recording — stopping: %s", session_id)
-        await daily_client.stop_recording(session.daily_room_name)
+    # Edge case: participant left while recording/paused → auto-stop and move to processing
+    if count < 2 and session.status in (SessionStatus.RECORDING, SessionStatus.PAUSED):
+        logger.info("Participant left during %s — stopping: %s", session.status, session_id)
+        if session.status == SessionStatus.RECORDING:
+            await daily_client.stop_recording(session.daily_room_name)
         session_repo.update_status(
             session_id, SessionStatus.PROCESSING, recording_stopped_at=now_iso()
         )
@@ -300,9 +304,12 @@ def _can_transition(current: SessionStatus, target: SessionStatus) -> bool:
 async def on_participant_joined(session_id: str, _room_name: str) -> None:
     """Webhook: participant.joined — RECONCILIATION.
 
-    Only acts if session is still in 'created' or 'waiting_for_guest' status,
-    meaning the FE's join_session() call hasn't been processed yet. If the FE
-    already moved the session forward, this is a no-op.
+    Only updates STATUS, never participant_count. The FE's join_session()
+    already manages the count. This webhook is a safety net for when the
+    FE call was missed (e.g. slow network, tab closed).
+
+    Only acts if session is still in 'created' or 'waiting_for_guest' status.
+    If the FE already moved the session forward, this is a no-op.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
@@ -316,37 +323,39 @@ async def on_participant_joined(session_id: str, _room_name: str) -> None:
         )
         return
 
-    count: int = session_repo.increment_participant_count(session_id, 1)
+    # Use the current count (set by FE) to decide status transition
+    count: int = session.participant_count
 
-    if session.status == SessionStatus.CREATED and count == 1:
+    if session.status == SessionStatus.CREATED and count >= 1:
         session_repo.update_status(session_id, SessionStatus.WAITING_FOR_GUEST)
-        logger.info("Webhook reconciliation: first participant joined %s", session_id)
+        logger.info("Webhook reconciliation: participant joined %s → waiting_for_guest", session_id)
     elif session.status == SessionStatus.WAITING_FOR_GUEST and count >= 2:
         session_repo.update_status(session_id, SessionStatus.READY)
-        logger.info("Webhook reconciliation: second participant joined %s → ready", session_id)
+        logger.info("Webhook reconciliation: participant joined %s → ready", session_id)
 
 
 async def on_participant_left(session_id: str, room_name: str) -> None:
     """Webhook: participant.left — SAFETY NET.
 
     Critical for handling browser crashes where the FE couldn't call
-    leave_session(). Always decrements participant_count (additive operation,
-    not a status regression). If a participant leaves mid-recording and the
-    FE didn't report it, this auto-stops the recording.
+    leave_session(). Does NOT decrement participant_count (the FE's
+    leave_session already handles that). Instead, reads the current
+    count and acts as a safety net for auto-stopping recordings.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
         return
 
-    count: int = session_repo.increment_participant_count(session_id, -1)
+    count: int = session.participant_count
 
-    # Auto-stop recording if participant left mid-recording (safety net for browser crash)
-    if count < 2 and session.status == SessionStatus.RECORDING:
+    # Auto-stop if participant left mid-recording or mid-pause (safety net for browser crash)
+    if count < 2 and session.status in (SessionStatus.RECORDING, SessionStatus.PAUSED):
         logger.info(
-            "Webhook safety net: participant left during recording — stopping: %s",
-            session_id,
+            "Webhook safety net: participant left during %s — stopping: %s",
+            session.status, session_id,
         )
-        await daily_client.stop_recording(room_name)
+        if session.status == SessionStatus.RECORDING:
+            await daily_client.stop_recording(room_name)
         session_repo.update_status(
             session_id, SessionStatus.PROCESSING, recording_stopped_at=now_iso()
         )
@@ -390,9 +399,22 @@ def on_recording_stopped(session_id: str, timestamp: str) -> None:
     This webhook catches the case where the FE call failed (e.g. network
     error after Daily.co accepted the stop). Skipped if the session
     is already at processing or beyond.
+
+    IMPORTANT: Also skipped if status is PAUSED. When the host pauses,
+    the BE calls daily_client.stop_recording() which triggers this webhook.
+    We must NOT advance to processing — the session is intentionally paused
+    and may be resumed later.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
+        return
+
+    # Skip if paused — pause intentionally stops recording, this is not an end-of-session event
+    if session.status == SessionStatus.PAUSED:
+        logger.info(
+            "Webhook skipped: recording.stopped for %s (session is paused, not ending)",
+            session_id,
+        )
         return
 
     if not _can_transition(session.status, SessionStatus.PROCESSING):
@@ -434,6 +456,7 @@ def _to_session_response(session: Session) -> SessionResponse:
         host_user_id=session.host_user_id,
         host_name=session.host_name,
         guest_name=session.guest_name,
+        daily_room_url=session.daily_room_url,
         participant_count=session.participant_count,
         recording_segments=session.recording_segments,
         recording_started_at=session.recording_started_at,
