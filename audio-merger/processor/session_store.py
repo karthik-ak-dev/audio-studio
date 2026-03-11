@@ -1,15 +1,22 @@
-"""Minimal DynamoDB client for the processor — only updates status."""
+"""DynamoDB client for the processor — reads session info and updates status."""
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 import boto3
 
 from processor.config import config
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(config.SESSIONS_TABLE)
+
+
+def get_session(session_id: str) -> Optional[dict]:
+    """Fetch full session record from DynamoDB."""
+    response = table.get_item(Key={"session_id": session_id})
+    return response.get("Item")
 
 
 def update_status(session_id: str, status: str, **extra: str) -> None:
@@ -19,7 +26,7 @@ def update_status(session_id: str, status: str, **extra: str) -> None:
         ":status": status,
         ":now": datetime.now(timezone.utc).isoformat(),
     }
-    names = {"#status": "status"}
+    names: dict[str, str] = {"#status": "status"}
 
     for key, value in extra.items():
         update_expr += f", {key} = :{key}"
@@ -31,4 +38,4 @@ def update_status(session_id: str, status: str, **extra: str) -> None:
         ExpressionAttributeNames=names,
         ExpressionAttributeValues=values,
     )
-    logger.info(f"Session {session_id} → {status}")
+    logger.info("Session %s → %s", session_id, status)
