@@ -4,6 +4,7 @@ from enum import StrEnum
 
 
 class SessionStatus(StrEnum):
+    """Valid session lifecycle states."""
     CREATED = "created"
     WAITING_FOR_GUEST = "waiting_for_guest"
     READY = "ready"

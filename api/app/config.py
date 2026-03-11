@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    """Environment-based application settings."""
     environment: str = "dev"
     sessions_table: str = "audio-sessions-dev"
     recordings_bucket: str = ""

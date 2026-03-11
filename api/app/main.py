@@ -27,4 +27,5 @@ app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 
 @app.get("/health")
 async def health() -> dict[str, str]:
+    """Health check endpoint."""
     return {"status": "ok", "version": "2.0.0"}

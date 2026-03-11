@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 
 class CreateSessionResponse(BaseModel):
+    """Returned after creating a new session."""
     session_id: str
     room_url: str
     host_token: str
@@ -14,6 +15,7 @@ class CreateSessionResponse(BaseModel):
 
 
 class SessionResponse(BaseModel):
+    """Full session state returned by GET /sessions/{id}."""
     session_id: str
     status: str
     host_user_id: str
@@ -41,9 +43,11 @@ class SessionResponse(BaseModel):
 
 
 class SessionActionResponse(BaseModel):
+    """Lightweight response for state-changing actions."""
     session_id: str
     status: str
 
 
 class SessionListResponse(BaseModel):
+    """Paginated list of sessions for a host."""
     sessions: list[SessionResponse]
