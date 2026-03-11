@@ -202,6 +202,47 @@ def conditional_update_status(
         raise
 
 
+def append_pause_event(session_id: str, paused_at: str) -> None:
+    """Append a new pause event to the pause_events list.
+
+    Creates {paused_at: ISO, resumed_at: null} entry.
+    Uses DynamoDB list_append for atomic append.
+    """
+    table.update_item(
+        Key={"session_id": session_id},
+        UpdateExpression="SET pause_events = list_append(if_not_exists(pause_events, :empty), :event), updated_at = :now",
+        ExpressionAttributeValues={
+            ":event": [{"paused_at": paused_at, "resumed_at": None}],
+            ":empty": [],
+            ":now": now_iso(),
+        },
+    )
+    logger.info("Pause event appended: session=%s paused_at=%s", session_id, paused_at)
+
+
+def update_last_pause_event_resume(session_id: str, resumed_at: str) -> None:
+    """Update the last pause_events entry with resumed_at timestamp.
+
+    Reads current pause_events to find the index of the last entry,
+    then uses SET pause_events[N].resumed_at = :ts for atomic update.
+    """
+    session = get_by_id(session_id)
+    if session is None or not session.pause_events:
+        logger.warning("Cannot update pause event: session=%s has no pause_events", session_id)
+        return
+
+    last_idx = len(session.pause_events) - 1
+    table.update_item(
+        Key={"session_id": session_id},
+        UpdateExpression=f"SET pause_events[{last_idx}].resumed_at = :ts, updated_at = :now",
+        ExpressionAttributeValues={
+            ":ts": resumed_at,
+            ":now": now_iso(),
+        },
+    )
+    logger.info("Pause event resumed: session=%s index=%d resumed_at=%s", session_id, last_idx, resumed_at)
+
+
 def get_by_host(host_user_id: str, limit: int = 20) -> list[Session]:
     """Query sessions by host_user_id using the HostUserIndex GSI."""
     response = table.query(

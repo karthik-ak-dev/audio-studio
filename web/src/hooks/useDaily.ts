@@ -196,6 +196,13 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
     setState((prev) => ({ ...prev, isMuted: localAudio }));
   }, []);
 
+  /** Programmatic mute/unmute — used for auto-mute on pause */
+  const setMuted = useCallback((muted: boolean) => {
+    if (!callRef.current) return;
+    callRef.current.setLocalAudio(!muted);
+    setState((prev) => ({ ...prev, isMuted: muted }));
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -213,5 +220,6 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
     join,
     leave,
     toggleMute,
+    setMuted,
   };
 }

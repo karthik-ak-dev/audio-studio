@@ -178,7 +178,6 @@ async def start_recording(session_id: str) -> SessionActionResponse:
         new_status=SessionStatus.RECORDING,
         required_status=SessionStatus.READY,
         recording_id=recording_id,
-        recording_segments="1",
         recording_started_at=now_iso(),
     )
     if not success:
@@ -192,8 +191,10 @@ async def start_recording(session_id: str) -> SessionActionResponse:
 
 
 async def pause_session(session_id: str) -> SessionActionResponse:
-    """Host pauses recording. Stops the current Daily.co recording segment.
+    """Host pauses recording. Logical pause — Daily recording keeps running.
 
+    Only updates DynamoDB status and appends to pause_events.
+    No Daily API call (recording continues, audio trimmed in post-processing).
     Uses conditional update: only succeeds if status == recording.
     """
     session: Session | None = session_repo.get_by_id(session_id)
@@ -203,25 +204,26 @@ async def pause_session(session_id: str) -> SessionActionResponse:
     if session.status != SessionStatus.RECORDING:
         raise InvalidSessionStateError(session_id, session.status, "pause")
 
-    await daily_client.stop_recording(session.daily_room_name)
-
+    pause_ts: str = now_iso()
     success: bool = session_repo.conditional_update_status(
         session_id=session_id,
         new_status=SessionStatus.PAUSED,
         required_status=SessionStatus.RECORDING,
-        last_pause_at=now_iso(),
     )
     if not success:
         raise InvalidSessionStateError(session_id, session.status, "pause")
 
-    logger.info("Recording paused: session=%s", session_id)
+    session_repo.append_pause_event(session_id, pause_ts)
+
+    logger.info("Recording paused (logical): session=%s", session_id)
     return SessionActionResponse(session_id=session_id, status=SessionStatus.PAUSED)
 
 
 async def resume_session(session_id: str) -> SessionActionResponse:
-    """Host resumes recording. Requires status == paused AND 2 participants.
+    """Host resumes recording. Logical resume — Daily recording is already running.
 
-    Starts a new Daily.co recording segment (increments recording_segments).
+    Only updates DynamoDB status and sets resumed_at on the last pause_events entry.
+    No Daily API call. Requires status == paused AND 2 participants.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
@@ -236,29 +238,25 @@ async def resume_session(session_id: str) -> SessionActionResponse:
             f"resume (need 2 participants, currently {session.participant_count})",
         )
 
-    await daily_client.start_recording(session.daily_room_name)
-    new_segments: int = session.recording_segments + 1
-
     success: bool = session_repo.conditional_update_status(
         session_id=session_id,
         new_status=SessionStatus.RECORDING,
         required_status=SessionStatus.PAUSED,
-        recording_segments=str(new_segments),
     )
     if not success:
         raise InvalidSessionStateError(session_id, session.status, "resume")
 
-    logger.info(
-        "Recording resumed: session=%s segment=%d", session_id, new_segments,
-    )
+    session_repo.update_last_pause_event_resume(session_id, now_iso())
+
+    logger.info("Recording resumed (logical): session=%s", session_id)
     return SessionActionResponse(session_id=session_id, status=SessionStatus.RECORDING)
 
 
 async def end_session(session_id: str) -> SessionActionResponse:
     """Host ends session — ONLY terminal user action.
 
-    Moves to processing. If currently recording, stops Daily.co recording first.
-    If paused, skip stop (already stopped).
+    Moves to processing. Always stops the Daily.co recording — this is the
+    ONLY place stop_recording is called (logical pause keeps recording running).
 
     Uses conditional update: only succeeds if status IN (recording, paused).
     """
@@ -269,9 +267,8 @@ async def end_session(session_id: str) -> SessionActionResponse:
     if session.status not in (SessionStatus.RECORDING, SessionStatus.PAUSED):
         raise InvalidSessionStateError(session_id, session.status, "end session")
 
-    # Only call Daily.co stop if actively recording (pause already stopped it)
-    if session.status == SessionStatus.RECORDING:
-        await daily_client.stop_recording(session.daily_room_name)
+    # Always stop — this is the ONLY place stop_recording is called
+    await daily_client.stop_recording(session.daily_room_name)
 
     success: bool = session_repo.conditional_update_status(
         session_id=session_id,
@@ -301,19 +298,19 @@ async def leave_session(session_id: str, req: LeaveRequest) -> SessionActionResp
     session: Session = session_repo.remove_participant(session_id, req.user_id)
     count: int = session.participant_count
 
-    # Auto-pause if participant left during recording
+    # Auto-pause if participant left during recording (logical — recording keeps running)
     if count < 2 and session.status == SessionStatus.RECORDING:
+        pause_ts: str = now_iso()
         logger.info(
-            "Auto-pause: participant %s left during recording — session=%s",
+            "Auto-pause (logical): participant %s left during recording — session=%s",
             req.user_id, session_id,
         )
-        await daily_client.stop_recording(session.daily_room_name)
         session_repo.conditional_update_status(
             session_id=session_id,
             new_status=SessionStatus.PAUSED,
             required_status=SessionStatus.RECORDING,
-            last_pause_at=now_iso(),
         )
+        session_repo.append_pause_event(session_id, pause_ts)
         return SessionActionResponse(session_id=session_id, status=SessionStatus.PAUSED)
 
     # Regress ready → waiting_for_guest if participant left before recording
@@ -445,19 +442,19 @@ async def on_participant_left(
     updated: Session = session_repo.remove_participant(session_id, user_id)
     count: int = updated.participant_count
 
-    # Auto-pause if participant left during recording
+    # Auto-pause if participant left during recording (logical — recording keeps running)
     if count < 2 and updated.status == SessionStatus.RECORDING:
+        pause_ts: str = now_iso()
         logger.info(
-            "Webhook auto-pause: participant left during recording — session=%s",
+            "Webhook auto-pause (logical): participant left during recording — session=%s",
             session_id,
         )
-        await daily_client.stop_recording(updated.daily_room_name)
         session_repo.conditional_update_status(
             session_id=session_id,
             new_status=SessionStatus.PAUSED,
             required_status=SessionStatus.RECORDING,
-            last_pause_at=now_iso(),
         )
+        session_repo.append_pause_event(session_id, pause_ts)
         return
 
     # Regress ready → waiting_for_guest
@@ -476,14 +473,10 @@ async def on_recording_ready_to_download(
 ) -> None:
     """Webhook: recording.ready-to-download — store s3_key for processing pipeline.
 
-    This fires when Daily.co finishes uploading raw tracks to S3.
-    NOT used for pause/resume/leave logic — purely for S3 data capture.
-
-    Guard: Skip if status == paused (pause-induced stop, s3_key still stored).
-    Guard: Skip if status >= processing (already terminal).
-    Safety net: If status still == recording (our DynamoDB write failed),
-    this is a reconciliation opportunity — but we do NOT move to processing.
-    Only "End Session" does that.
+    Fires ONCE per session (one continuous recording — pause/resume are logical,
+    Daily recording runs from Start to End Session without interruption).
+    This fires when Daily.co finishes uploading raw tracks to S3 after stop_recording.
+    Purely for S3 data capture — does NOT change session status.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
@@ -538,9 +531,9 @@ def _to_session_response(session: Session) -> SessionResponse:
         participant_count=session.participant_count,
         active_participants=sorted(session.active_participants),
         participants=session.participants,
-        recording_segments=session.recording_segments,
         recording_started_at=session.recording_started_at,
         recording_stopped_at=session.recording_stopped_at,
+        pause_events=session.pause_events,
         s3_key=session.s3_key,
         s3_processed_prefix=session.s3_processed_prefix,
         error_message=session.error_message,

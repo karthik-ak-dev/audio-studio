@@ -25,9 +25,9 @@ interface SessionState {
   participantCount: number;
   activeParticipants: string[];
   participantsRoster: Record<string, string>;
-  recordingSegments: number;
   recordingStartedAt: string | null;
   recordingStoppedAt: string | null;
+  pauseEvents: Array<{ paused_at: string; resumed_at: string | null }>;
   s3Key: string | null;
   s3ProcessedPrefix: string | null;
   errorMessage: string | null;
@@ -47,9 +47,9 @@ const initialState: SessionState = {
   participantCount: 0,
   activeParticipants: [],
   participantsRoster: {},
-  recordingSegments: 0,
   recordingStartedAt: null,
   recordingStoppedAt: null,
+  pauseEvents: [],
   s3Key: null,
   s3ProcessedPrefix: null,
   errorMessage: null,
@@ -123,9 +123,9 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         participantCount: s.participant_count,
         activeParticipants: s.active_participants,
         participantsRoster: s.participants,
-        recordingSegments: s.recording_segments,
         recordingStartedAt: s.recording_started_at,
         recordingStoppedAt: s.recording_stopped_at,
+        pauseEvents: s.pause_events ?? [],
         s3Key: s.s3_key,
         s3ProcessedPrefix: s.s3_processed_prefix,
         errorMessage: s.error_message,

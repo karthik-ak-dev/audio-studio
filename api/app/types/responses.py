@@ -1,6 +1,6 @@
 """Outbound response types — strict Pydantic models."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -29,9 +29,9 @@ class SessionResponse(BaseModel):
     participants: dict[str, str]
 
     # Recording state
-    recording_segments: int
     recording_started_at: Optional[str] = None
     recording_stopped_at: Optional[str] = None
+    pause_events: list[dict[str, Any]] = []
 
     # S3 data
     s3_key: Optional[str] = None

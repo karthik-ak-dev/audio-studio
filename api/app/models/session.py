@@ -39,11 +39,10 @@ class Session:  # pylint: disable=too-many-instance-attributes
     version: int = 0
 
     # Recording state
-    recording_segments: int = 0
     recording_id: str = ""
     recording_started_at: Optional[str] = None
     recording_stopped_at: Optional[str] = None
-    last_pause_at: Optional[str] = None
+    pause_events: list[dict[str, Optional[str]]] = field(default_factory=list)
     s3_key: Optional[str] = None
 
     # Post-processing
@@ -71,7 +70,6 @@ class Session:  # pylint: disable=too-many-instance-attributes
             "daily_room_url": self.daily_room_url,
             "status": self.status.value,
             "version": self.version,
-            "recording_segments": self.recording_segments,
             "recording_id": self.recording_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -85,13 +83,14 @@ class Session:  # pylint: disable=too-many-instance-attributes
         item["participant_connections"] = self.participant_connections
         item["participants"] = self.participants
 
+        # Pause events — always include (empty list is valid)
+        item["pause_events"] = self.pause_events
+
         # Optional fields — only include if set
         if self.recording_started_at is not None:
             item["recording_started_at"] = self.recording_started_at
         if self.recording_stopped_at is not None:
             item["recording_stopped_at"] = self.recording_stopped_at
-        if self.last_pause_at is not None:
-            item["last_pause_at"] = self.last_pause_at
         if self.s3_key is not None:
             item["s3_key"] = self.s3_key
         if self.s3_processed_prefix is not None:
@@ -116,6 +115,12 @@ class Session:  # pylint: disable=too-many-instance-attributes
         raw_roster = item.get("participants")
         roster: dict[str, str] = dict(raw_roster) if raw_roster else {}  # type: ignore[arg-type]
 
+        # Pause events — list of {paused_at, resumed_at} dicts
+        raw_pause_events = item.get("pause_events")
+        pause_events: list[dict[str, Optional[str]]] = (
+            list(raw_pause_events) if raw_pause_events else []  # type: ignore[arg-type]
+        )
+
         return cls(
             session_id=str(item["session_id"]),
             host_user_id=str(item["host_user_id"]),
@@ -128,11 +133,10 @@ class Session:  # pylint: disable=too-many-instance-attributes
             participant_connections=connections,
             participants=roster,
             version=int(item.get("version", 0)),  # type: ignore[arg-type]
-            recording_segments=int(item.get("recording_segments", 0)),  # type: ignore[arg-type]
             recording_id=str(item.get("recording_id", "")),
+            pause_events=pause_events,
             recording_started_at=_opt_str(item, "recording_started_at"),
             recording_stopped_at=_opt_str(item, "recording_stopped_at"),
-            last_pause_at=_opt_str(item, "last_pause_at"),
             s3_key=_opt_str(item, "s3_key"),
             s3_processed_prefix=_opt_str(item, "s3_processed_prefix"),
             error_message=_opt_str(item, "error_message"),

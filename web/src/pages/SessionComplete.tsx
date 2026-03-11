@@ -147,7 +147,7 @@ export function SessionComplete() {
             <div className="grid grid-cols-2 gap-3">
               <DetailCard label="Host" value={session.host_name} />
               <DetailCard label="Guest" value={session.guest_name} />
-              <DetailCard label="Segments" value={String(session.recording_segments)} />
+              <DetailCard label="Pauses" value={String(session.pause_events?.length ?? 0)} />
               <DetailCard label="Participants" value={participantNames.join(", ") || "—"} />
             </div>
 

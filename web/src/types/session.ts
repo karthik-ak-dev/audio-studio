@@ -36,9 +36,9 @@ export interface Session {
   participants: Record<string, string>;
 
   // Recording state
-  recording_segments: number;
   recording_started_at: string | null;
   recording_stopped_at: string | null;
+  pause_events: Array<{ paused_at: string; resumed_at: string | null }>;
 
   // S3 data
   s3_key: string | null;

@@ -258,6 +258,25 @@ export function AudioRoom() {
     }
   }, [sessionState.status, sessionState.recordingStartedAt, timer]);
 
+  // ─── 6. Auto-mute on pause, auto-unmute on resume ───
+  const prevStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    const curr = sessionState.status;
+    prevStatusRef.current = curr;
+
+    if (!daily.isJoined || prev === null) return;
+
+    // Transition: recording → paused — auto-mute
+    if (prev === "recording" && curr === "paused") {
+      daily.setMuted(true);
+    }
+    // Transition: paused → recording — auto-unmute
+    if (prev === "paused" && curr === "recording") {
+      daily.setMuted(false);
+    }
+  }, [sessionState.status, daily.isJoined, daily.setMuted]);
+
   // ─── Action handlers (with 400 re-poll) ───
   const handleStart = async () => {
     if (!sessionId) return;
@@ -407,7 +426,7 @@ export function AudioRoom() {
                 <MuteButton
                   isMuted={daily.isMuted}
                   onToggle={daily.toggleMute}
-                  disabled={!daily.isJoined}
+                  disabled={!daily.isJoined || isPaused}
                 />
 
                 {/* Recording controls */}
@@ -515,8 +534,8 @@ export function AudioRoom() {
                             : "Connecting..."
                     }
                   />
-                  {sessionState.recordingSegments > 0 && (
-                    <InfoRow label="Segments" value={String(sessionState.recordingSegments)} />
+                  {sessionState.pauseEvents.length > 0 && (
+                    <InfoRow label="Pauses" value={String(sessionState.pauseEvents.length)} />
                   )}
                 </div>
               </div>
