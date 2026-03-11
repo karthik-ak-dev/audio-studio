@@ -26,7 +26,7 @@ import uuid
 import logging
 
 from app.config import settings
-from app.constants import SessionStatus, SESSION_ID_LENGTH, STATUS_PRIORITY
+from app.constants import SessionStatus, SESSION_ID_LENGTH
 from app.models.session import Session
 from app.repos import session_repo
 from app.services.daily_client import daily_client
@@ -163,6 +163,12 @@ async def start_recording(session_id: str) -> SessionActionResponse:
 
     if session.status != SessionStatus.READY:
         raise InvalidSessionStateError(session_id, session.status, "start recording")
+
+    if session.participant_count < 2:
+        raise InvalidSessionStateError(
+            session_id, session.status,
+            f"start recording (need 2 participants, currently {session.participant_count})",
+        )
 
     result: dict[str, object] = await daily_client.start_recording(session.daily_room_name)
     recording_id = str(result.get("recordingId", ""))
@@ -341,11 +347,6 @@ async def list_sessions_by_host(host_user_id: str, limit: int = 20) -> list[Sess
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def _can_transition(current: SessionStatus, target: SessionStatus) -> bool:
-    """Return True only if target status is at the same or higher priority."""
-    return STATUS_PRIORITY.get(target, 0) >= STATUS_PRIORITY.get(current, 0)
-
-
 async def on_participant_joined(
     session_id: str,
     user_id: str,
@@ -373,21 +374,25 @@ async def on_participant_joined(
 
     count: int = session.participant_count
 
-    if session.status == SessionStatus.CREATED and count >= 1:
+    # Mirror FE join_session logic exactly
+    if count == 1 and session.status == SessionStatus.CREATED:
         session_repo.update_status(session_id, SessionStatus.WAITING_FOR_GUEST)
         logger.info(
-            "Webhook reconciliation: participant.joined session=%s -> waiting_for_guest",
+            "Webhook reconciliation: session=%s created -> waiting_for_guest",
             session_id,
         )
-    elif session.status == SessionStatus.WAITING_FOR_GUEST and count >= 2:
+
+    elif count >= 2 and session.status in (
+        SessionStatus.CREATED, SessionStatus.WAITING_FOR_GUEST,
+    ):
         session_repo.update_status(session_id, SessionStatus.READY)
         logger.info(
-            "Webhook reconciliation: participant.joined session=%s -> ready",
-            session_id,
+            "Webhook reconciliation: session=%s -> ready (count=%d)",
+            session_id, count,
         )
     else:
         logger.info(
-            "Webhook no-op: participant.joined session=%s status=%s count=%d (already handled)",
+            "Webhook no-op: participant.joined session=%s status=%s count=%d",
             session_id, session.status, count,
         )
 
@@ -497,19 +502,8 @@ async def on_recording_ready_to_download(
             session_id, recording_id,
         )
 
-    # Skip further processing if already in a terminal or paused state
-    if session.status in (
-        SessionStatus.PAUSED, SessionStatus.PROCESSING,
-        SessionStatus.COMPLETED, SessionStatus.ERROR,
-    ):
-        logger.info(
-            "Webhook skip: recording.ready-to-download session=%s status=%s",
-            session_id, session.status,
-        )
-        return
-
     logger.info(
-        "Webhook: recording.ready-to-download processed for session=%s status=%s",
+        "Webhook: recording.ready-to-download session=%s status=%s",
         session_id, session.status,
     )
 

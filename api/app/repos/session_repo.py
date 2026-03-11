@@ -120,9 +120,10 @@ def remove_participant(session_id: str, user_id: str) -> Session:
 
 def update_status(session_id: str, status: SessionStatus, **extra_fields: str) -> None:
     """Update session status and optional extra fields."""
-    update_expr: str = "SET #status = :status, updated_at = :now"
-    expr_values: dict[str, str] = {
+    update_expr: str = "SET #status = :status, version = version + :one, updated_at = :now"
+    expr_values: dict[str, Any] = {
         ":status": status.value,
+        ":one": 1,
         ":now": now_iso(),
     }
     expr_names: dict[str, str] = {"#status": "status"}
@@ -138,7 +139,7 @@ def update_status(session_id: str, status: SessionStatus, **extra_fields: str) -
         ExpressionAttributeNames=expr_names,
         ExpressionAttributeValues=expr_values,
     )
-    logger.info("Session %s status -> %s", session_id, status.value)
+    logger.info("Session %s: status -> %s", session_id, status.value)
 
 
 def conditional_update_status(

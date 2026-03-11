@@ -33,6 +33,8 @@ import hashlib
 import hmac
 import logging
 
+from collections import OrderedDict
+
 from fastapi import APIRouter, Request, HTTPException
 
 from app.config import settings
@@ -45,6 +47,12 @@ from app.types.webhooks import (
 
 logger: logging.Logger = logging.getLogger(__name__)
 router: APIRouter = APIRouter()
+
+# In-memory dedup cache for webhook event IDs.
+# Daily.co can deliver duplicates; we skip events we've already processed.
+# OrderedDict with max size acts as an LRU cache — sufficient for single-instance.
+_DEDUP_MAX: int = 1000
+_processed_events: OrderedDict[str, bool] = OrderedDict()
 
 
 def _verify_signature(raw_body: str, signature: str, timestamp: str) -> bool:
@@ -120,6 +128,11 @@ async def daily_webhook(request: Request) -> dict[str, str]:
 
     logger.info("Webhook received: type=%s id=%s", event_type, event_id)
 
+    # Idempotency dedup — skip events we've already processed
+    if event_id and event_id in _processed_events:
+        logger.info("Webhook dedup: already processed id=%s, skipping", event_id)
+        return {"status": "ok"}
+
     # ─── Participant events (use payload.room) ─────────────
     if event_type == "participant.joined":
         parsed = ParticipantPayload(**payload)
@@ -174,5 +187,11 @@ async def daily_webhook(request: Request) -> dict[str, str]:
 
     else:
         logger.info("Webhook ignored: unhandled event type=%s", event_type)
+
+    # Mark event as processed for dedup
+    if event_id:
+        _processed_events[event_id] = True
+        if len(_processed_events) > _DEDUP_MAX:
+            _processed_events.popitem(last=False)
 
     return {"status": "ok"}
