@@ -1,10 +1,14 @@
 # SAM CLI deploy configuration
 # Usage: cd infrastructure && sam deploy
+#
+# Stage deploy:
+#   sam deploy --config-env stage --parameter-overrides \
+#     DailyApiKey=xxx DailyWebhookSecret=xxx
 
 version = 0.1
 
 [default.deploy.parameters]
-stack_name = "audio-recording-platform-dev"
+stack_name = "audio-studio-dev"
 region = "ap-south-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
@@ -25,7 +29,7 @@ parameter_overrides = [
 use_container = false
 
 [stage.deploy.parameters]
-stack_name = "audio-recording-platform-stage"
+stack_name = "audio-studio-stage"
 region = "ap-south-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
@@ -36,8 +40,16 @@ parameter_overrides = [
   "DailyDomain=ak-kgen",
 ]
 
+# FrontendOrigin left empty — auto-uses CloudFront URL
+# Secrets — pass at deploy time:
+#   sam deploy --config-env stage --parameter-overrides \
+#     DailyApiKey=xxx DailyWebhookSecret=xxx
+
+[stage.build.parameters]
+use_container = false
+
 [prod.deploy.parameters]
-stack_name = "audio-recording-platform-prod"
+stack_name = "audio-studio-prod"
 region = "ap-south-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
@@ -47,3 +59,6 @@ parameter_overrides = [
   "Environment=prod",
   "DailyDomain=ak-kgen",
 ]
+
+[prod.build.parameters]
+use_container = false

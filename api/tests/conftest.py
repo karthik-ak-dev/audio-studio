@@ -15,7 +15,7 @@ def _env_setup() -> Generator[None, None, None]:
     """Set environment variables for tests."""
     env_vars: dict[str, str] = {
         "ENVIRONMENT": "test",
-        "SESSIONS_TABLE": "audio-sessions-test",
+        "SESSIONS_TABLE": "audio-studio-sessions-test",
         "RECORDINGS_BUCKET": "audio-recordings-test",
         "DAILY_API_KEY": "test-daily-key",
         "DAILY_WEBHOOK_SECRET": "",
@@ -31,7 +31,7 @@ def dynamodb_table() -> Generator[None, None, None]:
     with mock_aws():
         client = boto3.client("dynamodb", region_name="ap-south-1")
         client.create_table(
-            TableName="audio-sessions-test",
+            TableName="audio-studio-sessions-test",
             KeySchema=[{"AttributeName": "session_id", "KeyType": "HASH"}],
             AttributeDefinitions=[
                 {"AttributeName": "session_id", "AttributeType": "S"},

@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Audio Recording Platform — Unified Infrastructure
-  S3, IAM, DynamoDB, API Gateway, API Lambda, Audio Merger Lambda
+  Audio Studio — Unified Infrastructure
+  S3, IAM, DynamoDB, API Gateway, API Lambda, Audio Merger Lambda, CloudFront
 
 # ──────────────────────────────────────────────
 # Parameters
@@ -23,22 +23,29 @@ Parameters:
   DailyWebhookSecret:
     Type: String
     NoEcho: true
+    Default: ""
     Description: Daily.co webhook HMAC secret
 
   DailyDomain:
     Type: String
-    Description: "Daily.co domain name (e.g. ak-kgen)"
+    Description: "Daily.co domain name (e.g. my-domain)"
 
   FrontendOrigin:
     Type: String
-    Default: "http://localhost:5173"
-    Description: Allowed CORS origin for the frontend
+    Default: ""
+    Description: "Allowed CORS origin — leave empty to auto-use CloudFront URL"
 
   MergeDuration:
     Type: String
     Default: "longest"
     AllowedValues: ["longest", "shortest", "first"]
     Description: "Merge duration strategy — longest (pad silence), shortest (truncate), first (match first input)"
+
+# ──────────────────────────────────────────────
+# Conditions
+# ──────────────────────────────────────────────
+Conditions:
+  HasCustomFrontendOrigin: !Not [!Equals [!Ref FrontendOrigin, ""]]
 
 # ──────────────────────────────────────────────
 # Globals
@@ -60,12 +67,12 @@ Resources:
   RecordingsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "audio-recordings-${Environment}-${AWS::AccountId}"
+      BucketName: !Sub "audio-studio-recordings-${Environment}-${AWS::AccountId}"
       VersioningConfiguration:
         Status: Enabled
       LifecycleConfiguration:
         Rules:
-          - Id: DeleteRawRecordingsAfter30Days
+          - Id: DeleteRawRecordingsAfter180Days
             Prefix: !Sub "${DailyDomain}/"
             Status: Enabled
             ExpirationInDays: 180
@@ -80,7 +87,7 @@ Resources:
   DailyRecordingsRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "DailyRecordingsRole-${Environment}"
+      RoleName: !Sub "audio-studio-daily-role-${Environment}"
       MaxSessionDuration: 43200
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -107,11 +114,80 @@ Resources:
                   - !GetAtt RecordingsBucket.Arn
                   - !Sub "${RecordingsBucket.Arn}/*"
 
+  # ─── S3: Frontend Hosting ───────────────────
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "audio-studio-web-${Environment}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: "s3:GetObject"
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
+  # ─── CloudFront: CDN ────────────────────────
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "audio-studio-oac-${Environment}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "audio-studio-cdn-${Environment}"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref FrontendOAC
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          Compress: true
+        CustomErrorResponses:
+          # SPA — route all 404s to index.html for client-side routing
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
   # ─── DynamoDB: Sessions Table ────────────────
   SessionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "audio-sessions-${Environment}"
+      TableName: !Sub "audio-studio-sessions-${Environment}"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: session_id
@@ -147,13 +223,16 @@ Resources:
         Enabled: true
 
   # ─── API Gateway: HTTP API ───────────────────
-  AudioApi:
+  AudioStudioApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Environment
       CorsConfiguration:
         AllowOrigins:
-          - !Ref FrontendOrigin
+          - !If
+            - HasCustomFrontendOrigin
+            - !Ref FrontendOrigin
+            - !Sub "https://${FrontendDistribution.DomainName}"
         AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
         AllowHeaders: [Content-Type, Authorization, X-Api-Key]
         MaxAge: 3600
@@ -162,7 +241,7 @@ Resources:
   ApiFn:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "audio-api-${Environment}"
+      FunctionName: !Sub "audio-studio-api-${Environment}"
       Handler: app.handler.handler
       CodeUri: ../api/
       Timeout: 30
@@ -174,11 +253,15 @@ Resources:
           DAILY_API_KEY: !Ref DailyApiKey
           DAILY_WEBHOOK_SECRET: !Ref DailyWebhookSecret
           DAILY_DOMAIN: !Ref DailyDomain
+          FRONTEND_ORIGIN: !If
+            - HasCustomFrontendOrigin
+            - !Ref FrontendOrigin
+            - !Sub "https://${FrontendDistribution.DomainName}"
       Events:
         CatchAll:
           Type: HttpApi
           Properties:
-            ApiId: !Ref AudioApi
+            ApiId: !Ref AudioStudioApi
             Path: /{proxy+}
             Method: ANY
       Policies:
@@ -189,7 +272,7 @@ Resources:
   FfmpegLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: !Sub "ffmpeg-${Environment}"
+      LayerName: !Sub "audio-studio-ffmpeg-${Environment}"
       Description: Static ffmpeg binary for arm64 Lambda
       ContentUri: ../audio-merger/layers/ffmpeg/
       CompatibleRuntimes:
@@ -202,7 +285,7 @@ Resources:
   AudioMergerFn:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "audio-merger-${Environment}"
+      FunctionName: !Sub "audio-studio-merger-${Environment}"
       Handler: processor.handler.handler
       CodeUri: ../audio-merger/
       Timeout: 900
@@ -244,7 +327,19 @@ Outputs:
 
   ApiUrl:
     Description: API Gateway endpoint URL
-    Value: !Sub "https://${AudioApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+    Value: !Sub "https://${AudioStudioApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+
+  FrontendUrl:
+    Description: CloudFront URL for the frontend
+    Value: !Sub "https://${FrontendDistribution.DomainName}"
+
+  FrontendBucketName:
+    Description: S3 bucket for frontend static files
+    Value: !Ref FrontendBucket
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID (for cache invalidation)
+    Value: !Ref FrontendDistribution
 
   RecordingsBucketName:
     Description: S3 bucket for raw and processed recordings
@@ -255,7 +350,7 @@ Outputs:
     Value: !GetAtt RecordingsBucket.Arn
 
   DailyRecordingsRoleArn:
-    Description: IAM role ARN — configure this in Daily.co domain settings
+    Description: IAM role ARN — configure this in Daily.co S3 bucket settings
     Value: !GetAtt DailyRecordingsRole.Arn
 
   SessionsTableName:
