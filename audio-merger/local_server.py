@@ -9,14 +9,8 @@ import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+# handler import configures logging via basicConfig (see processor/handler.py)
 from processor.handler import handler
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s %(asctime)s [%(name)s] %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-    force=True,
-)
 
 logger = logging.getLogger("audio-merger.local")
 

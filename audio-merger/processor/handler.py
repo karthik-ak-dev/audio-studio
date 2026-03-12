@@ -123,7 +123,7 @@ def _group_tracks_by_participant(
     return dict(groups)
 
 
-def _process_session(
+def _process_session(  # pylint: disable=too-many-locals
     session_id: str,
     track_keys: list[str],
     participant_map: dict[str, dict[str, str]],
@@ -185,14 +185,14 @@ def _process_session(
 
         # Upload: individual participant files + combined
         output_prefix = f"{config.processed_prefix}session-{session_id}"
-        upload_paths = [*participant_wavs, combined_path]
+        all_outputs = [*participant_wavs, combined_path]
         logger.info(
             "session=%s Uploading %d files to %s/",
-            session_id, len(upload_paths), output_prefix,
+            session_id, len(all_outputs), output_prefix,
         )
-        for wav_path in upload_paths:
-            filename = os.path.basename(wav_path)
-            upload_file(session_id, wav_path, f"{output_prefix}/{filename}")
+        for wav_path in all_outputs:
+            upload_file(session_id, wav_path,
+                        f"{output_prefix}/{os.path.basename(wav_path)}")
 
         # Update session status
         update_status(
@@ -261,7 +261,10 @@ def handler(event: dict, _context: object) -> dict:
         update_status(session_id, "error", error_message="No audio tracks found in S3")
         return {"status": "no_tracks"}
 
-    logger.info("session=%s Found %d tracks — starting processing pipeline", session_id, len(tracks))
+    logger.info(
+        "session=%s Found %d tracks — starting processing pipeline",
+        session_id, len(tracks),
+    )
     _process_session(session_id, tracks, participant_map)
 
     logger.info("session=%s ===== AUDIO MERGER DONE =====", session_id)
