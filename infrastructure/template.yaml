@@ -258,6 +258,8 @@ Resources:
             - HasCustomFrontendOrigin
             - !Ref FrontendOrigin
             - !Sub "https://${FrontendDistribution.DomainName}"
+          # TODO: Uncomment when enabling Audio Merger
+          # AUDIO_MERGER_FUNCTION_NAME: !Ref AudioMergerFn
       Events:
         CatchAll:
           Type: HttpApi
@@ -268,6 +270,9 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SessionsTable
+        # TODO: Uncomment when enabling Audio Merger
+        # - LambdaInvokePolicy:
+        #     FunctionName: !Ref AudioMergerFn
 
   # ─── Lambda Layer: ffmpeg ──────────────────────
   # TODO: Uncomment when enabling Audio Merger
@@ -304,19 +309,7 @@ Resources:
   #         DAILY_DOMAIN: !Ref DailyDomain
   #         PROCESSED_PREFIX: "processed/"
   #         MERGE_DURATION: !Ref MergeDuration
-  #     Events:
-  #       RawTrackUploaded:
-  #         Type: S3
-  #         Properties:
-  #           Bucket: !Ref RecordingsBucket
-  #           Events: s3:ObjectCreated:*
-  #           Filter:
-  #             S3Key:
-  #               Rules:
-  #                 - Name: prefix
-  #                   Value: !Sub "${DailyDomain}/"
-  #                 - Name: suffix
-  #                   Value: "audio"
+  #     # No Events block — invoked directly by API Lambda via boto3
   #     Policies:
   #       - S3CrudPolicy:
   #           BucketName: !Ref RecordingsBucket

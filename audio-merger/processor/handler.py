@@ -1,4 +1,11 @@
-"""Lambda entry point — triggered by S3 events when Daily uploads audio tracks."""
+"""Lambda entry point — invoked by API webhook handler after recording.ready-to-download.
+
+Trigger: Direct Lambda invocation from the API's on_recording_ready_to_download handler.
+Payload: {"session_id": "abc123", "domain": "ak-kgen"}
+
+NOT triggered by S3 events — see ARCHITECTURE.md Flow 17 for why S3 events
+cause a race condition when participants disconnect mid-recording.
+"""
 
 import os
 import re
@@ -7,10 +14,6 @@ from typing import Optional
 from collections import defaultdict
 
 from processor.config import config
-from processor.constants import (
-    AUDIO_TRACK_IDENTIFIER,
-    MIN_PARTICIPANTS,
-)
 from processor.s3_client import (
     list_audio_tracks,
     download_track,
@@ -45,27 +48,15 @@ def _build_participant_map(
 
     Uses connection_history (connectionId → userId) which is append-only
     and contains ALL connection IDs ever used, including reconnections.
-
-    Falls back to inverting participant_connections for older sessions
-    that don't have connection_history yet.
     """
     names: dict = session.get("participants", {})
     history: dict = session.get("connection_history", {})
     result: dict[str, dict[str, str]] = {}
 
-    if history:
-        # Preferred: connection_history has ALL connectionIds
-        for conn_id, user_id in history.items():
-            role = "host" if user_id.startswith("host-") else "guest"
-            name = names.get(user_id, role.capitalize())
-            result[conn_id] = {"role": role, "name": name}
-    else:
-        # Fallback: invert participant_connections (only has latest per user)
-        connections: dict = session.get("participant_connections", {})
-        for user_id, conn_id in connections.items():
-            role = "host" if user_id.startswith("host-") else "guest"
-            name = names.get(user_id, role.capitalize())
-            result[conn_id] = {"role": role, "name": name}
+    for conn_id, user_id in history.items():
+        role = "host" if user_id.startswith("host-") else "guest"
+        name = names.get(user_id, role.capitalize())
+        result[conn_id] = {"role": role, "name": name}
 
     return result
 
@@ -111,73 +102,6 @@ def _group_tracks_by_participant(
         groups[group_key].append(s3_key)
 
     return dict(groups)
-
-
-def _count_distinct_participants(
-    track_keys: list[str],
-    participant_map: dict[str, dict[str, str]],
-) -> int:
-    """Count how many distinct participant roles have tracks."""
-    roles: set[str] = set()
-    for s3_key in track_keys:
-        conn_id = _extract_connection_id(s3_key)
-        if conn_id and conn_id in participant_map:
-            roles.add(participant_map[conn_id]["role"])
-    return len(roles)
-
-
-def handler(event: dict, _context: object) -> dict:
-    """S3 event handler — waits for tracks from all participants, then processes."""
-    for record in event.get("Records", []):
-        s3_key: str = record["s3"]["object"]["key"]
-        logger.info("S3 event: %s", s3_key)
-
-        parts = s3_key.split("/")
-        if len(parts) < 3 or AUDIO_TRACK_IDENTIFIER not in s3_key:
-            logger.warning("Skipping non-audio key: %s", s3_key)
-            continue
-
-        domain = parts[0]
-        room_name = parts[1]
-        session_id = (
-            room_name.removeprefix("session-")
-            if room_name.startswith("session-")
-            else room_name
-        )
-
-        if processed_exists(session_id):
-            logger.info(
-                "Session %s already processed, skipping", session_id,
-            )
-            continue
-
-        # Load session to get connection_history for participant mapping
-        session = get_session(session_id)
-        if not session:
-            logger.warning("Session %s not found in DynamoDB, skipping", session_id)
-            continue
-
-        participant_map = _build_participant_map(session)
-
-        room_prefix = f"{domain}/{room_name}/"
-        tracks = list_audio_tracks(room_prefix)
-
-        # Wait until we have tracks from at least MIN_PARTICIPANTS distinct participants
-        distinct = _count_distinct_participants(tracks, participant_map)
-        if distinct < MIN_PARTICIPANTS:
-            logger.info(
-                "Session %s: %d tracks from %d/%d participants — waiting",
-                session_id, len(tracks), distinct, MIN_PARTICIPANTS,
-            )
-            continue
-
-        logger.info(
-            "Session %s: %d tracks from %d participants — processing",
-            session_id, len(tracks), distinct,
-        )
-        _process_session(session_id, tracks, participant_map)
-
-    return {"status": "ok"}
 
 
 def _process_session(
@@ -252,3 +176,40 @@ def _process_session(
                 os.remove(path)
             except OSError:
                 pass
+
+def handler(event: dict, _context: object) -> dict:
+    """Direct invocation handler — called by API after recording.ready-to-download.
+
+    Expected payload: {"session_id": "abc123", "domain": "ak-kgen"}
+    """
+    session_id: str = event["session_id"]
+    domain: str = event["domain"]
+
+    logger.info("Invoked for session=%s domain=%s", session_id, domain)
+
+    # Idempotency guard — skip if already processed
+    if processed_exists(session_id):
+        logger.info("Session %s already processed, skipping", session_id)
+        return {"status": "already_processed"}
+
+    # Load session for participant mapping
+    session = get_session(session_id)
+    if not session:
+        logger.error("Session %s not found in DynamoDB", session_id)
+        return {"status": "session_not_found"}
+
+    participant_map = _build_participant_map(session)
+
+    # List all audio tracks for this session
+    room_prefix = f"{domain}/session-{session_id}/"
+    tracks = list_audio_tracks(room_prefix)
+
+    if not tracks:
+        logger.error("Session %s: no audio tracks found at %s", session_id, room_prefix)
+        update_status(session_id, "error", error_message="No audio tracks found in S3")
+        return {"status": "no_tracks"}
+
+    logger.info("Session %s: %d tracks — processing", session_id, len(tracks))
+    _process_session(session_id, tracks, participant_map)
+
+    return {"status": "ok"}

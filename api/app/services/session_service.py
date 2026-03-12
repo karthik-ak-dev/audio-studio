@@ -22,8 +22,11 @@ Session lifecycle:
                                                               ↘ error (terminal)
 """
 
+import json
 import uuid
 import logging
+
+import boto3
 
 from app.config import settings
 from app.constants import SessionStatus, SESSION_ID_LENGTH
@@ -471,12 +474,14 @@ async def on_recording_ready_to_download(
     recording_id: str,
     s3_key: str,
 ) -> None:
-    """Webhook: recording.ready-to-download — store s3_key for processing pipeline.
+    """Webhook: recording.ready-to-download — store s3_key + invoke audio merger Lambda.
 
     Fires ONCE per session (one continuous recording — pause/resume are logical,
     Daily recording runs from Start to End Session without interruption).
     This fires when Daily.co finishes uploading raw tracks to S3 after stop_recording.
-    Purely for S3 data capture — does NOT change session status.
+
+    1. Stores s3_key in DynamoDB for reference.
+    2. Invokes audio-merger Lambda asynchronously with {session_id, domain}.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
@@ -485,7 +490,7 @@ async def on_recording_ready_to_download(
         )
         return
 
-    # Always store s3_key if present (useful for processing pipeline)
+    # Store s3_key if present (useful for debugging / reference)
     if s3_key:
         session_repo.update_status(
             session_id, session.status, s3_key=s3_key,
@@ -493,6 +498,28 @@ async def on_recording_ready_to_download(
         logger.info(
             "Webhook: recording.ready-to-download — stored s3_key for session=%s recording=%s",
             session_id, recording_id,
+        )
+
+    # Invoke audio-merger Lambda asynchronously
+    if settings.audio_merger_function_name:
+        lambda_client = boto3.client("lambda")
+        payload = {
+            "session_id": session_id,
+            "domain": settings.daily_domain,
+        }
+        lambda_client.invoke(
+            FunctionName=settings.audio_merger_function_name,
+            InvocationType="Event",  # Async — fire and forget
+            Payload=json.dumps(payload),
+        )
+        logger.info(
+            "Webhook: invoked audio merger Lambda for session=%s",
+            session_id,
+        )
+    else:
+        logger.warning(
+            "Webhook: AUDIO_MERGER_FUNCTION_NAME not set — skipping Lambda invoke for session=%s",
+            session_id,
         )
 
     logger.info(

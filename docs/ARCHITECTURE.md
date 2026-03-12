@@ -161,7 +161,7 @@
 │          paused|processing|completed|error               │
 │  version: Number                  ← optimistic locking  │
 │                                                         │
-│  ── Participant Tracking (3 fields) ──                  │
+│  ── Participant Tracking (4 fields) ──                  │
 │                                                         │
 │  active_participants: Set<String>                       │
 │    e.g. {"host-174...", "guest-abc..."}                  │
@@ -185,6 +185,16 @@
 │    Write-once, never removed                            │
 │    Used for: showing names (even after disconnect)      │
 │                                                         │
+│  connection_history: Map<String,String>                  │
+│    e.g. {"aaaa1111-...": "host-174...",                  │
+│          "bbbb2222-...": "guest-abc...",                 │
+│          "cccc3333-...": "guest-abc..."}                 │
+│    connectionId → userId (append-only, NEVER overwritten)│
+│    Contains ALL connectionIds ever used in this session  │
+│    Written by add_participant() on every join            │
+│    Used by: audio-merger to map S3 track files →         │
+│      participants (connectionId is embedded in S3 key)  │
+│                                                         │
 │  ── Recording State ──                                  │
 │  recording_id                                           │
 │  recording_started_at, recording_stopped_at             │
@@ -204,7 +214,7 @@
 
 ---
 
-## Why Three Participant Fields?
+## Why Four Participant Fields?
 
 We evaluated three approaches and chose the one that passes all 14 edge-case scenarios:
 
@@ -354,7 +364,7 @@ We subscribe to **4 webhook events**. All events share these top-level fields:
 }
 ```
 
-**We use**: `room_name` → session_id, `s3_key` → store for processing pipeline, `recording_id` → verify match. Fires ONCE per session (one continuous recording — pause/resume do not stop/start Daily recording). Purely for S3 data capture + safety net reconciliation.
+**We use**: `room_name` → session_id, `s3_key` → store in DynamoDB, `recording_id` → verify match. Fires ONCE per session (one continuous recording — pause/resume do not stop/start Daily recording). This is the **trigger for the audio-merger Lambda** — invoked directly from the webhook handler. This ensures all raw track files are in S3 before processing begins.
 
 ### 4. recording.error
 
@@ -578,18 +588,21 @@ Numbers = STATUS_PRIORITY — webhooks can only move forward (or lateral), never
 # 1. ADD user_id to active_participants set (idempotent)
 # 2. SET participant_connections[user_id] = connection_id (overwrite on reconnect)
 # 3. SET participants[user_id] = user_name (roster, write-once)
+# 4. SET connection_history[connection_id] = user_id (append-only, for audio-merger)
 table.update_item(
     Key={"session_id": session_id},
     UpdateExpression="""
         ADD active_participants :user_set
         SET participant_connections.#uid = :conn_id,
             participants.#uid = if_not_exists(participants.#uid, :name),
+            connection_history.#conn_id = :user_id,
             updated_at = :now
     """,
-    ExpressionAttributeNames={"#uid": user_id},
+    ExpressionAttributeNames={"#uid": user_id, "#conn_id": connection_id},
     ExpressionAttributeValues={
         ":user_set": {user_id},          # DynamoDB String Set
         ":conn_id": connection_id,        # Daily's session_id (connection-level ID)
+        ":user_id": user_id,             # For connection_history (append-only)
         ":name": user_name,               # Display name (write-once)
         ":now": now_iso(),
     },
@@ -958,9 +971,11 @@ GUEST SIDE:
    - Show overlay: "Host ended the session" (2.5s)
    - Navigate to /session/{id}/complete
 
-WEBHOOK (recording.ready-to-download, fires later when files hit S3):
-   → Re-read → status=processing → already advanced → SKIP
-   → Store s3_key + tracks data (needed by audio processing pipeline)
+WEBHOOK (recording.ready-to-download, fires ~30-60s after stop_recording):
+   → All raw track files are now finalized in S3
+   → Store s3_key in DynamoDB
+   → Invoke audio-merger Lambda directly (async) with session_id
+   → Lambda processes tracks → status: completed (see Flow 17)
 ```
 
 ### Flow 8: Participant Leaves Mid-Recording (Explicit Button — Auto-Pause)
@@ -1234,32 +1249,235 @@ IF NETWORK STAYS DOWN (>30s):
        → When network recovers, user reloads page → Flow 11 (refresh)
 ```
 
-### Flow 17: Audio Processing (Async)
+### Flow 17: Audio Processing Pipeline
 
 ```
-TRIGGER: Daily.co uploads raw audio tracks to S3 (~30-60s after stop)
-         ONE S3 folder per session (one continuous recording)
-         Files: {timestamp}-{participant-uuid}-audio-{track-start}.webm
+┌──────────────────────────────────────────────────────────────────────┐
+│                  HOW DAILY.CO STORES RAW TRACKS IN S3                │
+│                                                                      │
+│  Daily.co uses raw-tracks recording mode. When start_recording()     │
+│  is called, Daily's GStreamer pipeline begins capturing audio from    │
+│  each WebRTC connection and streaming it to our S3 bucket via        │
+│  multipart uploads.                                                  │
+│                                                                      │
+│  S3 bucket structure:                                                │
+│    {daily_domain}/session-{session_id}/                              │
+│      ├── {recordTs}-{connectionId1}-cam-audio-{trackTs1}             │
+│      ├── {recordTs}-{connectionId1}-cam-audio-{trackTs2}  ← reconnect│
+│      ├── {recordTs}-{connectionId2}-cam-audio-{trackTs3}             │
+│      └── ...                                                         │
+│                                                                      │
+│  Key facts:                                                          │
+│    - Format: WebM/Opus (not WAV)                                     │
+│    - ONE file per WebRTC connection (not per participant)             │
+│    - If a participant disconnects and rejoins, they get a NEW         │
+│      connectionId → NEW track file                                   │
+│    - A single guest who reconnects 3 times produces 4 track files    │
+│    - The connectionId is a UUID embedded in the S3 key               │
+│    - Files are streamed in real-time via S3 multipart upload         │
+│    - An S3 object becomes visible (ObjectCreated event) when its     │
+│      multipart upload is FINALIZED — not before                      │
+│                                                                      │
+│  Example with guest reconnect:                                       │
+│    ak-kgen/session-abc123/                                           │
+│      1710000000-aaaa1111-...-cam-audio-1710000001   ← host           │
+│      1710000000-bbbb2222-...-cam-audio-1710000002   ← guest (1st)    │
+│      1710000000-cccc3333-...-cam-audio-1710000500   ← guest (rejoin) │
+│                                                                      │
+│  The connectionId (aaaa1111-..., bbbb2222-..., cccc3333-...) is      │
+│  the key to mapping tracks → participants. This is why we store      │
+│  connection_history in DynamoDB (see below).                         │
+└──────────────────────────────────────────────────────────────────────┘
 
-S3 EVENT → audio-merger Lambda
+┌──────────────────────────────────────────────────────────────────────┐
+│              WHY S3 EVENTS CANNOT TRIGGER THE MERGER                 │
+│                                                                      │
+│  RACE CONDITION — premature processing:                              │
+│                                                                      │
+│  When a participant disconnects mid-recording, their WebRTC stream   │
+│  ends. Daily's GStreamer pipeline finalizes that track's multipart   │
+│  upload → S3 ObjectCreated fires IMMEDIATELY for that track.         │
+│                                                                      │
+│  Timeline:                                                           │
+│    min 0:  Recording starts (host + guest connected)                 │
+│    min 5:  Guest disconnects → guest's track finalized in S3         │
+│            → S3 ObjectCreated fires → Lambda triggers                │
+│            → Lambda lists tracks, finds 2 participants → PROCESSES   │
+│            → combined.wav uploaded with PARTIAL audio                │
+│    min 6:  Guest rejoins (new connection, new track starts)          │
+│    min 10: Host clicks "End Session" → stop_recording()             │
+│            → remaining tracks finalize → S3 events fire              │
+│            → Lambda checks processed_exists() → TRUE → SKIPS        │
+│                                                                      │
+│  RESULT: The guest's second half is permanently lost.                │
+│                                                                      │
+│  The ONLY reliable signal that ALL tracks are finalized is the       │
+│  recording.ready-to-download webhook, which fires ONCE after         │
+│  stop_recording() and all multipart uploads are complete.            │
+└──────────────────────────────────────────────────────────────────────┘
 
-LAMBDA:
-  1. List tracks for session (one folder, one file per participant)
-  2. If < 2 tracks → return (wait for next S3 event)
-  3. If >= 2:
-     a. Download all tracks
-     b. Read pause_events from DynamoDB for this session
-     c. Trim paused sections from each track using pause_events
-        - For each {paused_at, resumed_at} pair, remove that time range
-        - If resumed_at is null (ended while paused), trim from paused_at to end
-     d. Convert, merge, upload processed files
-  4. DynamoDB: status → completed, s3_processed_prefix set
-  5. On error: status → error, error_message set
+┌──────────────────────────────────────────────────────────────────────┐
+│              TRIGGER: recording.ready-to-download WEBHOOK             │
+│                                                                      │
+│  The audio-merger is triggered by the API's webhook handler, NOT     │
+│  by S3 events. Flow:                                                 │
+│                                                                      │
+│  1. Host clicks "End Session"                                        │
+│     → API calls stop_recording() (the ONLY stop)                    │
+│     → API sets DynamoDB status = processing                          │
+│                                                                      │
+│  2. Daily.co finalizes all track uploads to S3 (~30-60s)             │
+│                                                                      │
+│  3. Daily.co fires recording.ready-to-download webhook               │
+│     (fires ONCE per session, only after ALL tracks are in S3)        │
+│                                                                      │
+│  4. API webhook handler receives it:                                 │
+│     → Stores s3_key in DynamoDB                                      │
+│     → Invokes audio-merger Lambda directly (async)                   │
+│                                                                      │
+│  Why direct Lambda invoke (not SNS/SQS):                             │
+│    - Simpler — no extra infrastructure                               │
+│    - One webhook = one invocation = one processing run               │
+│    - Lambda handles retries natively (on error, can be re-invoked)  │
+│    - No risk of duplicate/premature triggers                         │
+│                                                                      │
+│  Guarantees:                                                         │
+│    - stop_recording() is called ONLY in end_session()                │
+│    - recording.ready-to-download fires ONLY after stop_recording()   │
+│    - No other code path calls stop_recording()                       │
+│    - Pause/resume are logical only — Daily recording runs            │
+│      continuously from Start to End                                  │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+```
+PROCESSING PIPELINE (audio-merger Lambda):
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ INPUT: session_id from webhook invocation                       │
+  │                                                                 │
+  │ Step 1: Load session from DynamoDB                              │
+  │   → connection_history: {                                       │
+  │       "aaaa1111-...": "host-174...",                            │
+  │       "bbbb2222-...": "guest-abc...",                           │
+  │       "cccc3333-...": "guest-abc..."   ← same guest, new conn  │
+  │     }                                                           │
+  │   → participants: {                                             │
+  │       "host-174...": "Alice",                                   │
+  │       "guest-abc...": "Bob"                                     │
+  │     }                                                           │
+  │                                                                 │
+  │ Step 2: List all audio tracks in S3 under room prefix           │
+  │   → Filter by "cam-audio" identifier                            │
+  │   → Returns sorted list of S3 keys                              │
+  │                                                                 │
+  │ Step 3: Extract connectionId from each S3 key (regex)           │
+  │   Key format: {ts}-{connectionId}-cam-audio-{trackTs}           │
+  │   Regex: \d+-([0-9a-f-]{36})-cam-audio-                        │
+  │                                                                 │
+  │ Step 4: Map connectionId → participant using connection_history  │
+  │   connectionId aaaa1111 → host-174 → role:host, name:Alice      │
+  │   connectionId bbbb2222 → guest-abc → role:guest, name:Bob      │
+  │   connectionId cccc3333 → guest-abc → role:guest, name:Bob      │
+  │                                                                 │
+  │ Step 5: Group tracks by participant                              │
+  │   {                                                              │
+  │     "host-alice":  ["s3/key-aaaa1111-..."],                     │
+  │     "guest-bob":   ["s3/key-bbbb2222-...", "s3/key-cccc3333-..."]│
+  │   }                                                              │
+  │                                                                 │
+  │ Step 6: Per participant — concat + convert (single ffmpeg pass)  │
+  │   host-alice:  1 WebM segment  → decode → host-alice.wav        │
+  │   guest-bob:   2 WebM segments → decode + concat → guest-bob.wav│
+  │                                                                 │
+  │   ffmpeg command (multi-segment):                                │
+  │     ffmpeg -y -i seg0.webm -i seg1.webm                         │
+  │       -filter_complex "concat=n=2:v=0:a=1,                      │
+  │         aformat=sample_fmts=s16:sample_rates=48000               │
+  │         :channel_layouts=mono"                                   │
+  │       -acodec pcm_s16le -ar 48000 -ac 1 guest-bob.wav           │
+  │                                                                 │
+  │ Step 7: Merge all participant WAVs → combined.wav                │
+  │   ffmpeg -y -i host-alice.wav -i guest-bob.wav                   │
+  │     -filter_complex "amix=inputs=2:duration=longest:normalize=0, │
+  │       aformat=sample_fmts=s16:sample_rates=48000                 │
+  │       :channel_layouts=mono"                                     │
+  │     combined.wav                                                 │
+  │                                                                 │
+  │ Step 8: Upload to S3                                             │
+  │   {domain}-processed/session-{session_id}/                       │
+  │     ├── host-alice.wav      (individual track)                   │
+  │     ├── guest-bob.wav       (individual track)                   │
+  │     └── combined.wav        (merged mix)                         │
+  │                                                                 │
+  │ Step 9: Update DynamoDB                                          │
+  │   status → completed                                             │
+  │   s3_processed_prefix → s3://{bucket}/{domain}-processed/        │
+  │                             session-{session_id}/                 │
+  │                                                                 │
+  │ On error: status → error, error_message stored                   │
+  └─────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ PROCESSED OUTPUT — S3 PATH STRUCTURE                            │
+  │                                                                 │
+  │ Raw tracks (written by Daily.co):                               │
+  │   s3://{bucket}/{domain}/session-{id}/                          │
+  │     ├── {ts}-{connId1}-cam-audio-{trackTs}     (WebM/Opus)     │
+  │     ├── {ts}-{connId2}-cam-audio-{trackTs}     (WebM/Opus)     │
+  │     └── ...                                                     │
+  │                                                                 │
+  │ Processed output (written by audio-merger):                     │
+  │   s3://{bucket}/{domain}-processed/session-{id}/                │
+  │     ├── host-{name}.wav        48kHz mono PCM 16-bit            │
+  │     ├── guest-{name}.wav       48kHz mono PCM 16-bit            │
+  │     └── combined.wav           48kHz mono PCM 16-bit            │
+  │                                                                 │
+  │ Processed prefix resolution (ProcessorConfig.processed_prefix): │
+  │   1. PROCESSED_PREFIX env var (explicit override)               │
+  │   2. {DAILY_DOMAIN}-processed/ (e.g. "ak-kgen-processed/")     │
+  │   3. "processed/" (fallback)                                    │
+  │                                                                 │
+  │ Output format: WAV with pcm_s16le codec, 48kHz, mono            │
+  │ Why WAV: lossless, universally compatible, needed for            │
+  │   downstream ML/transcription pipelines                         │
+  └─────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ CONNECTION HISTORY — the key to track mapping                   │
+  │                                                                 │
+  │ DynamoDB field: connection_history (Map<String, String>)        │
+  │   connectionId → userId (append-only, never overwritten)        │
+  │                                                                 │
+  │ Written by: add_participant() in session_repo.py                │
+  │   Both FE /join and webhook participant.joined flow through     │
+  │   the same atomic update that appends to connection_history     │
+  │                                                                 │
+  │ Why not use participant_connections?                             │
+  │   participant_connections stores ONLY the latest connectionId   │
+  │   per user. When a guest reconnects, their old connectionId     │
+  │   is overwritten. The audio-merger needs ALL connectionIds      │
+  │   to map every track file.                                      │
+  │                                                                 │
+  │ Example:                                                        │
+  │   participant_connections (latest only):                         │
+  │     { "guest-abc": "cccc3333-..." }   ← lost bbbb2222          │
+  │                                                                 │
+  │   connection_history (append-only):                              │
+  │     { "aaaa1111-...": "host-174...",                            │
+  │       "bbbb2222-...": "guest-abc...",  ← preserved!             │
+  │       "cccc3333-...": "guest-abc..." }                          │
+  │                                                                 │
+  │ Fallback: for older sessions without connection_history,         │
+  │   the merger inverts participant_connections (only has latest    │
+  │   per user — some tracks may be unmapped, assigned fallback     │
+  │   names like "host-speaker-1", "guest-speaker-2")               │
+  └─────────────────────────────────────────────────────────────────┘
 
 HOST/GUEST (on SessionComplete page):
   Polling every 3s: GET /sessions/{id}
   - processing → spinner: "Converting and merging audio tracks"
-  - completed → "Audio files ready" + S3 path
+  - completed → "Audio files ready" + s3_processed_prefix
   - error → error message
 ```
 
@@ -1336,12 +1554,14 @@ HOST/GUEST (on SessionComplete page):
 │                                                                  │
 │  3. recording.ready-to-download                                  │
 │     Extract: room_name, recording_id, s3_key, tracks             │
-│     Primary value: store s3_key + tracks for processing pipeline │
+│     Actions:                                                      │
+│       a. Store s3_key in DynamoDB for reference                  │
+│       b. Invoke audio-merger Lambda directly (async)             │
+│          → passes session_id so Lambda can load session +         │
+│            list tracks from S3                                    │
 │     This fires ONCE per session (one continuous recording).      │
+│     This is the ONLY trigger for the audio-merger Lambda.        │
 │     Guard: SKIP if status >= processing (already terminal)       │
-│     If status is still recording/paused when this fires, it      │
-│       means end_session's DynamoDB write failed — store s3_key   │
-│       but do NOT advance status (only "End Session" does that).  │
 │     NOTE: NEVER moves to processing — only "End Session" does    │
 │     NOTE: no "recording.stopped" event exists in Daily.co        │
 │                                                                  │
@@ -1516,13 +1736,13 @@ HOST/GUEST (on SessionComplete page):
 
 | File | Changes |
 |------|---------|
-| `api/app/models/session.py` | Remove `participant_count`, remove `recording_segments`. Add `active_participants: set[str]`, `participant_connections: dict[str,str]`, `participants: dict[str,str]` (roster), `version: int`, `last_pause_at: Optional[str]`, `s3_key: Optional[str]`, `pause_events: list[dict]`. Update serialization. |
-| `api/app/repos/session_repo.py` | Add `add_participant(session_id, user_id, connection_id, user_name)` — atomic ADD+SET. Add `remove_participant(session_id, user_id)` — atomic DELETE+REMOVE. Add `conditional_update_status()`. Add `append_pause_event()` and `update_last_pause_event()` for pause_events list ops. Remove `increment_participant_count()`. |
+| `api/app/models/session.py` | Remove `participant_count`, remove `recording_segments`. Add `active_participants: set[str]`, `participant_connections: dict[str,str]`, `participants: dict[str,str]` (roster), `connection_history: dict[str,str]` (connectionId→userId, append-only), `version: int`, `last_pause_at: Optional[str]`, `s3_key: Optional[str]`, `pause_events: list[dict]`. Update serialization. |
+| `api/app/repos/session_repo.py` | Add `add_participant(session_id, user_id, connection_id, user_name)` — atomic ADD+SET+connection_history append. Add `remove_participant(session_id, user_id)` — atomic DELETE+REMOVE. Add `conditional_update_status()`. Add `append_pause_event()` and `update_last_pause_event()` for pause_events list ops. Remove `increment_participant_count()`. |
 | `api/app/services/session_service.py` | Join/leave accept `user_id`, `connection_id`, `user_name`. Leave triggers logical auto-pause if recording (DynamoDB only, NO Daily stop_recording). Webhook `on_participant_left` checks connection map for staleness. Replace `on_recording_stopped` with `on_recording_ready_to_download` (stores `s3_key`). Start calls `daily_client.start_recording()` (ONLY start). End calls `daily_client.stop_recording()` (ONLY stop). Pause/resume do NOT call Daily API — only update DynamoDB status + pause_events. |
 | `api/app/routes/sessions.py` | Rename `/stop` to `/end`. Join/leave accept request body with `user_id`, `connection_id`, `user_name`. Return `active_participants`, `participants` roster in responses. |
 | `api/app/routes/webhooks.py` | Fix HMAC verification (Base64 decode secret, `timestamp.body` message, Base64 encode result). Extract `user_id` and `session_id` (Daily's connection ID) from participant payloads. Use `room_name` (not `room`) for recording events. Handle `recording.ready-to-download` instead of `recording.stopped`. Use `error_msg` field for recording errors. Use `X-Webhook-Timestamp` header. |
 | `api/app/types/requests.py` | Add `JoinRequest(user_id, connection_id, user_name)`, `LeaveRequest(user_id)`. |
-| `api/app/types/responses.py` | Add `participant_count` (derived from set size), `active_participants: list[str]`, `participants: dict[str,str]` (roster), `s3_key: Optional[str]`, `pause_events: list[dict]`. Remove `recording_segments`. |
+| `api/app/types/responses.py` | Add `participant_count` (derived from set size), `active_participants: list[str]`, `participants: dict[str,str]` (roster), `connection_history: dict[str,str]`, `s3_key: Optional[str]`, `pause_events: list[dict]`. Remove `recording_segments`. |
 | `api/app/types/webhooks.py` | Rewrite to match actual Daily.co payloads. Participant events: `room`, `user_id`, `session_id` (connection ID), `user_name`, `owner`, `joined_at`, `duration`, `permissions`. Recording events: `room_name`, `recording_id`, `s3_key`, `tracks`, `error_msg`. Top-level: `id` (idempotency key). |
 
 ### Frontend (10 files)
