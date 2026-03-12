@@ -83,14 +83,16 @@ aws dynamodb scan \
 
 ## AWS Credentials
 
-The audio-merger container needs real AWS credentials to access S3 (download raw tracks, upload processed WAVs). It mounts your host `~/.aws` directory read-only:
+The audio-merger container needs real AWS credentials to access S3 (download raw tracks, upload processed WAVs). Export temporary credentials from IAM Identity Center (SSO) in your shell before starting:
 
-```yaml
-volumes:
-  - ~/.aws:/root/.aws:ro
+```bash
+export AWS_ACCESS_KEY_ID="ASIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_SESSION_TOKEN="..."
+make up
 ```
 
-Ensure you have valid credentials configured (`aws configure`). DynamoDB is local — no real AWS access needed for that.
+Docker Compose picks up these shell variables and passes them into the audio-merger container. When creds expire, re-export new ones and restart (`make down && make up`). DynamoDB is local — no real AWS access needed for that.
 
 ## What Works Locally vs What Needs Stage
 

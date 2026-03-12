@@ -274,21 +274,7 @@ Resources:
         # - LambdaInvokePolicy:
         #     FunctionName: !Ref AudioMergerFn
 
-  # ─── Lambda Layer: ffmpeg ──────────────────────
-  # TODO: Uncomment when enabling Audio Merger
-  # FfmpegLayer:
-  #   Type: AWS::Serverless::LayerVersion
-  #   Properties:
-  #     LayerName: !Sub "audio-studio-ffmpeg-${Environment}"
-  #     Description: Static ffmpeg binary for arm64 Lambda
-  #     ContentUri: ../audio-merger/layers/ffmpeg/
-  #     CompatibleRuntimes:
-  #       - python3.12
-  #     CompatibleArchitectures:
-  #       - arm64
-  #     RetentionPolicy: Retain
-
-  # ─── Lambda: Audio Merger (ffmpeg) ───────────
+  # ─── Lambda: Audio Merger (zip deploy, static ffmpeg in bin/) ─────
   # TODO: Uncomment when enabling Audio Merger
   # AudioMergerFn:
   #   Type: AWS::Serverless::Function
@@ -300,8 +286,6 @@ Resources:
   #     MemorySize: 1024
   #     EphemeralStorage:
   #       Size: 2048
-  #     Layers:
-  #       - !Ref FfmpegLayer
   #     Environment:
   #       Variables:
   #         RECORDINGS_BUCKET: !Ref RecordingsBucket

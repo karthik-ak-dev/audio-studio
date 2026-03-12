@@ -29,6 +29,9 @@ infrastructure/env.local.json
 # SAM
 .aws-sam/
 
+# Static ffmpeg binary (downloaded for Lambda deploy)
+audio-merger/bin/ffmpeg
+
 # OS
 .DS_Store
 Thumbs.db

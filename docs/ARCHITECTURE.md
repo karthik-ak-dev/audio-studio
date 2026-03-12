@@ -1468,10 +1468,8 @@ PROCESSING PIPELINE (audio-merger Lambda):
   │       "bbbb2222-...": "guest-abc...",  ← preserved!             │
   │       "cccc3333-...": "guest-abc..." }                          │
   │                                                                 │
-  │ Fallback: for older sessions without connection_history,         │
-  │   the merger inverts participant_connections (only has latest    │
-  │   per user — some tracks may be unmapped, assigned fallback     │
-  │   names like "host-speaker-1", "guest-speaker-2")               │
+  │ If a track's connectionId isn't found in connection_history,     │
+  │   it's assigned a fallback name like "host-speaker-1".           │
   └─────────────────────────────────────────────────────────────────┘
 
 HOST/GUEST (on SessionComplete page):

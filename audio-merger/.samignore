@@ -1,0 +1,4 @@
+local_server.py
+Dockerfile
+__pycache__/
+*.pyc

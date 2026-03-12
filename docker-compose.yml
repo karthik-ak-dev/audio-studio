@@ -133,6 +133,7 @@ services:
       MERGE_DURATION: longest
       ENVIRONMENT: dev
       DYNAMODB_ENDPOINT: http://dynamodb:8000
+      FFMPEG_PATH: /usr/bin/ffmpeg
       AWS_DEFAULT_REGION: ap-south-1
     depends_on:
       dynamodb:

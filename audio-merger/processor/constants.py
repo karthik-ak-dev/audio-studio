@@ -1,13 +1,15 @@
 """Audio processing constants — single source of truth."""
 
+import os
+
 # Output format for ML training
 SAMPLE_RATE: int = 48000
 BIT_DEPTH: int = 16
 CHANNELS: int = 1  # Mono
 CODEC: str = "pcm_s16le"
 
-# ffmpeg binary location in Lambda Layer
-FFMPEG_PATH: str = "/opt/bin/ffmpeg"
+# ffmpeg binary — /var/task/bin/ffmpeg on Lambda (bundled), /usr/bin/ffmpeg locally
+FFMPEG_PATH: str = os.environ.get("FFMPEG_PATH", "/var/task/bin/ffmpeg")
 
 # Processing
 FFMPEG_TIMEOUT_SEC: int = 600
