@@ -42,6 +42,57 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
   const callRef = useRef<DailyCall | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>(0);
+  const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+
+  /** Attach or detach <audio> elements for remote participants' audio tracks. */
+  const syncRemoteAudio = useCallback((call: DailyCall) => {
+    const participants = call.participants();
+    const activeIds = new Set<string>();
+
+    for (const [key, p] of Object.entries(participants)) {
+      if (key === "local") continue;
+      const sessionId = String((p as unknown as Record<string, unknown>).session_id ?? "");
+      if (!sessionId) continue;
+      activeIds.add(sessionId);
+
+      const track = p.tracks?.audio?.persistentTrack;
+      if (!track) {
+        // No track — clean up any existing element
+        const el = remoteAudioRefs.current.get(sessionId);
+        if (el) {
+          el.srcObject = null;
+          el.remove();
+          remoteAudioRefs.current.delete(sessionId);
+        }
+        continue;
+      }
+
+      // Already attached to this track
+      const existing = remoteAudioRefs.current.get(sessionId);
+      if (existing && existing.srcObject instanceof MediaStream) {
+        const existingTrack = existing.srcObject.getAudioTracks()[0];
+        if (existingTrack?.id === track.id) continue;
+      }
+
+      // Create or reuse <audio> element
+      const el = existing ?? document.createElement("audio");
+      el.autoplay = true;
+      // Prevent echo — never attach local audio to a speaker
+      el.srcObject = new MediaStream([track]);
+      if (!existing) {
+        remoteAudioRefs.current.set(sessionId, el);
+      }
+    }
+
+    // Remove elements for participants who left
+    for (const [sessionId, el] of remoteAudioRefs.current) {
+      if (!activeIds.has(sessionId)) {
+        el.srcObject = null;
+        el.remove();
+        remoteAudioRefs.current.delete(sessionId);
+      }
+    }
+  }, []);
 
   const updateParticipants = useCallback((call: DailyCall) => {
     const allParticipants = call.participants();
@@ -105,6 +156,7 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
       call.on("joined-meeting", () => {
         setState((prev) => ({ ...prev, isJoined: true, error: null }));
         updateParticipants(call);
+        syncRemoteAudio(call);
 
         // Start mic level monitoring
         const tracks = call.participants().local?.tracks;
@@ -119,11 +171,12 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
         setState(initialState);
       });
 
-      // Participant events — update local SDK state + trigger server poll
+      // Participant events — update local SDK state, sync remote audio, trigger server poll
       call.on(
         "participant-joined",
         (_event?: DailyEventObjectParticipant) => {
           updateParticipants(call);
+          syncRemoteAudio(call);
           onSdkEvent?.("participant-joined");
         },
       );
@@ -132,12 +185,14 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
         "participant-left",
         (_event?: DailyEventObjectParticipantLeft) => {
           updateParticipants(call);
+          syncRemoteAudio(call);
           onSdkEvent?.("participant-left");
         },
       );
 
       call.on("participant-updated", () => {
         updateParticipants(call);
+        syncRemoteAudio(call);
       });
 
       call.on(
@@ -175,11 +230,20 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
       setState((prev) => ({ ...prev, error: msg }));
       onError?.(msg);
     }
-  }, [roomUrl, token, onSdkEvent, onError, updateParticipants, startMicLevelMonitor]);
+  }, [roomUrl, token, onSdkEvent, onError, updateParticipants, syncRemoteAudio, startMicLevelMonitor]);
+
+  const cleanupRemoteAudio = useCallback(() => {
+    for (const [, el] of remoteAudioRefs.current) {
+      el.srcObject = null;
+      el.remove();
+    }
+    remoteAudioRefs.current.clear();
+  }, []);
 
   const leave = useCallback(async () => {
     cancelAnimationFrame(animFrameRef.current);
     micAnalyserRef.current = null;
+    cleanupRemoteAudio();
 
     if (callRef.current) {
       await callRef.current.leave();
@@ -187,7 +251,7 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
       callRef.current = null;
     }
     setState(initialState);
-  }, []);
+  }, [cleanupRemoteAudio]);
 
   const toggleMute = useCallback(() => {
     if (!callRef.current) return;
@@ -207,6 +271,11 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
   useEffect(() => {
     return () => {
       cancelAnimationFrame(animFrameRef.current);
+      for (const [, el] of remoteAudioRefs.current) {
+        el.srcObject = null;
+        el.remove();
+      }
+      remoteAudioRefs.current.clear();
       if (callRef.current) {
         callRef.current.leave().catch(() => {});
         callRef.current.destroy();
