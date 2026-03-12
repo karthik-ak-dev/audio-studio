@@ -35,11 +35,12 @@ Parameters:
     Default: ""
     Description: "Allowed CORS origin — leave empty to auto-use CloudFront URL"
 
-  MergeDuration:
-    Type: String
-    Default: "longest"
-    AllowedValues: ["longest", "shortest", "first"]
-    Description: "Merge duration strategy — longest (pad silence), shortest (truncate), first (match first input)"
+  # TODO: Uncomment when enabling Audio Merger
+  # MergeDuration:
+  #   Type: String
+  #   Default: "longest"
+  #   AllowedValues: ["longest", "shortest", "first"]
+  #   Description: "Merge duration strategy — longest (pad silence), shortest (truncate), first (match first input)"
 
 # ──────────────────────────────────────────────
 # Conditions
@@ -269,56 +270,58 @@ Resources:
             TableName: !Ref SessionsTable
 
   # ─── Lambda Layer: ffmpeg ──────────────────────
-  FfmpegLayer:
-    Type: AWS::Serverless::LayerVersion
-    Properties:
-      LayerName: !Sub "audio-studio-ffmpeg-${Environment}"
-      Description: Static ffmpeg binary for arm64 Lambda
-      ContentUri: ../audio-merger/layers/ffmpeg/
-      CompatibleRuntimes:
-        - python3.12
-      CompatibleArchitectures:
-        - arm64
-      RetentionPolicy: Retain
+  # TODO: Uncomment when enabling Audio Merger
+  # FfmpegLayer:
+  #   Type: AWS::Serverless::LayerVersion
+  #   Properties:
+  #     LayerName: !Sub "audio-studio-ffmpeg-${Environment}"
+  #     Description: Static ffmpeg binary for arm64 Lambda
+  #     ContentUri: ../audio-merger/layers/ffmpeg/
+  #     CompatibleRuntimes:
+  #       - python3.12
+  #     CompatibleArchitectures:
+  #       - arm64
+  #     RetentionPolicy: Retain
 
   # ─── Lambda: Audio Merger (ffmpeg) ───────────
-  AudioMergerFn:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "audio-studio-merger-${Environment}"
-      Handler: processor.handler.handler
-      CodeUri: ../audio-merger/
-      Timeout: 900
-      MemorySize: 1024
-      EphemeralStorage:
-        Size: 2048
-      Layers:
-        - !Ref FfmpegLayer
-      Environment:
-        Variables:
-          RECORDINGS_BUCKET: !Ref RecordingsBucket
-          SESSIONS_TABLE: !Ref SessionsTable
-          DAILY_DOMAIN: !Ref DailyDomain
-          PROCESSED_PREFIX: "processed/"
-          MERGE_DURATION: !Ref MergeDuration
-      Events:
-        RawTrackUploaded:
-          Type: S3
-          Properties:
-            Bucket: !Ref RecordingsBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: !Sub "${DailyDomain}/"
-                  - Name: suffix
-                    Value: "audio"
-      Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref RecordingsBucket
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SessionsTable
+  # TODO: Uncomment when enabling Audio Merger
+  # AudioMergerFn:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     FunctionName: !Sub "audio-studio-merger-${Environment}"
+  #     Handler: processor.handler.handler
+  #     CodeUri: ../audio-merger/
+  #     Timeout: 900
+  #     MemorySize: 1024
+  #     EphemeralStorage:
+  #       Size: 2048
+  #     Layers:
+  #       - !Ref FfmpegLayer
+  #     Environment:
+  #       Variables:
+  #         RECORDINGS_BUCKET: !Ref RecordingsBucket
+  #         SESSIONS_TABLE: !Ref SessionsTable
+  #         DAILY_DOMAIN: !Ref DailyDomain
+  #         PROCESSED_PREFIX: "processed/"
+  #         MERGE_DURATION: !Ref MergeDuration
+  #     Events:
+  #       RawTrackUploaded:
+  #         Type: S3
+  #         Properties:
+  #           Bucket: !Ref RecordingsBucket
+  #           Events: s3:ObjectCreated:*
+  #           Filter:
+  #             S3Key:
+  #               Rules:
+  #                 - Name: prefix
+  #                   Value: !Sub "${DailyDomain}/"
+  #                 - Name: suffix
+  #                   Value: "audio"
+  #     Policies:
+  #       - S3CrudPolicy:
+  #           BucketName: !Ref RecordingsBucket
+  #       - DynamoDBCrudPolicy:
+  #           TableName: !Ref SessionsTable
 
 # ──────────────────────────────────────────────
 # Outputs
@@ -361,6 +364,18 @@ Outputs:
     Description: API Lambda function ARN
     Value: !GetAtt ApiFn.Arn
 
-  AudioMergerFunctionArn:
-    Description: Audio Merger Lambda function ARN
-    Value: !GetAtt AudioMergerFn.Arn
+  # TODO: Uncomment when enabling Audio Merger
+  # AudioMergerFunctionArn:
+  #   Description: Audio Merger Lambda function ARN
+  #   Value: !GetAtt AudioMergerFn.Arn
+
+
+# Deploy stage:
+# cd infrastructure && sam build --config-env stage --use-container
+
+# Deploy (pass your secrets)
+# sam deploy --config-env stage --parameter-overrides \
+#   DailyApiKey=62e43afcba46bb216b37dc6b97c98dff0936e2483090a4b67f743b593faf1628 \
+#   DailyWebhookSecret=YOUR_DAILY_WEBHOOK_SECRET \
+#   DailyDomain=ak-kgen \
+#   Environment=stage
