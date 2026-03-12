@@ -68,7 +68,7 @@ def _verify_signature(raw_body: str, signature: str, timestamp: str) -> bool:
     Returns True (pass-through) if no secret is configured — this allows
     local development without webhook signature verification.
     """
-    if not settings.daily_webhook_secret:
+    if not settings.daily_webhook_secret or settings.daily_webhook_secret == "none":
         return True
 
     try:
@@ -121,10 +121,25 @@ async def daily_webhook(request: Request) -> dict[str, str]:
     if not _verify_signature(raw_body, signature, timestamp):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
-    raw: dict[str, object] = await request.json()
+    # Handle empty body or non-JSON — Daily sends a test request on webhook creation
+    if not raw_body.strip():
+        logger.info("Webhook: empty body (test ping), returning 200")
+        return {"status": "ok"}
+
+    try:
+        raw: dict[str, object] = await request.json()
+    except Exception:
+        logger.info("Webhook: non-JSON body (test ping), returning 200")
+        return {"status": "ok"}
+
     event_type: str = str(raw.get("type", ""))
     event_id: str = str(raw.get("id", ""))
     payload: dict[str, object] = raw.get("payload", {})  # type: ignore[assignment]
+
+    # Handle test/ping events with no type
+    if not event_type:
+        logger.info("Webhook: no event type (test ping), returning 200")
+        return {"status": "ok"}
 
     logger.info("Webhook received: type=%s id=%s", event_type, event_id)
 

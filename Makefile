@@ -54,7 +54,7 @@ deploy-stage: ## Deploy backend to stage (DAILY_API_KEY=DailyApiKey)
 	$(INFRA) sam build --config-env stage --use-container
 	$(INFRA) sam deploy --config-env stage --parameter-overrides \
 		"DailyApiKey=$(DAILY_API_KEY)" \
-		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),)"
+		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)"
 
 deploy-stage-fe: ## Deploy frontend to stage
 	@$(eval API_URL := $(shell aws cloudformation describe-stacks \
@@ -80,7 +80,7 @@ deploy-prod: ## Deploy backend to prod (DAILY_API_KEY=DailyApiKey)
 	$(INFRA) sam build --config-env prod --use-container
 	$(INFRA) sam deploy --config-env prod --parameter-overrides \
 		"DailyApiKey=$(DAILY_API_KEY)" \
-		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),)"
+		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)"
 
 deploy-prod-fe: ## Deploy frontend to prod
 	@$(eval API_URL := $(shell aws cloudformation describe-stacks \
