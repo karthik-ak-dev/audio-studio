@@ -35,12 +35,11 @@ Parameters:
     Default: ""
     Description: "Allowed CORS origin — leave empty to auto-use CloudFront URL"
 
-  # TODO: Uncomment when enabling Audio Merger
-  # MergeDuration:
-  #   Type: String
-  #   Default: "longest"
-  #   AllowedValues: ["longest", "shortest", "first"]
-  #   Description: "Merge duration strategy — longest (pad silence), shortest (truncate), first (match first input)"
+  MergeDuration:
+    Type: String
+    Default: "longest"
+    AllowedValues: ["longest", "shortest", "first"]
+    Description: "Merge duration strategy — longest (pad silence), shortest (truncate), first (match first input)"
 
 # ──────────────────────────────────────────────
 # Conditions
@@ -258,8 +257,7 @@ Resources:
             - HasCustomFrontendOrigin
             - !Ref FrontendOrigin
             - !Sub "https://${FrontendDistribution.DomainName}"
-          # TODO: Uncomment when enabling Audio Merger
-          # AUDIO_MERGER_FUNCTION_NAME: !Ref AudioMergerFn
+          AUDIO_MERGER_FUNCTION_NAME: !Ref AudioMergerFn
       Events:
         CatchAll:
           Type: HttpApi
@@ -270,35 +268,33 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SessionsTable
-        # TODO: Uncomment when enabling Audio Merger
-        # - LambdaInvokePolicy:
-        #     FunctionName: !Ref AudioMergerFn
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AudioMergerFn
 
   # ─── Lambda: Audio Merger (zip deploy, static ffmpeg in bin/) ─────
-  # TODO: Uncomment when enabling Audio Merger
-  # AudioMergerFn:
-  #   Type: AWS::Serverless::Function
-  #   Properties:
-  #     FunctionName: !Sub "audio-studio-merger-${Environment}"
-  #     Handler: processor.handler.handler
-  #     CodeUri: ../audio-merger/
-  #     Timeout: 900
-  #     MemorySize: 1024
-  #     EphemeralStorage:
-  #       Size: 2048
-  #     Environment:
-  #       Variables:
-  #         RECORDINGS_BUCKET: !Ref RecordingsBucket
-  #         SESSIONS_TABLE: !Ref SessionsTable
-  #         DAILY_DOMAIN: !Ref DailyDomain
-  #         PROCESSED_PREFIX: "processed/"
-  #         MERGE_DURATION: !Ref MergeDuration
-  #     # No Events block — invoked directly by API Lambda via boto3
-  #     Policies:
-  #       - S3CrudPolicy:
-  #           BucketName: !Ref RecordingsBucket
-  #       - DynamoDBCrudPolicy:
-  #           TableName: !Ref SessionsTable
+  AudioMergerFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "audio-studio-merger-${Environment}"
+      Handler: processor.handler.handler
+      CodeUri: ../audio-merger/
+      Timeout: 900
+      MemorySize: 1024
+      EphemeralStorage:
+        Size: 2048
+      Environment:
+        Variables:
+          RECORDINGS_BUCKET: !Ref RecordingsBucket
+          SESSIONS_TABLE: !Ref SessionsTable
+          DAILY_DOMAIN: !Ref DailyDomain
+          PROCESSED_PREFIX: "processed/"
+          MERGE_DURATION: !Ref MergeDuration
+      # No Events block — invoked directly by API Lambda via boto3
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref RecordingsBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
 
 # ──────────────────────────────────────────────
 # Outputs
@@ -341,10 +337,9 @@ Outputs:
     Description: API Lambda function ARN
     Value: !GetAtt ApiFn.Arn
 
-  # TODO: Uncomment when enabling Audio Merger
-  # AudioMergerFunctionArn:
-  #   Description: Audio Merger Lambda function ARN
-  #   Value: !GetAtt AudioMergerFn.Arn
+  AudioMergerFunctionArn:
+    Description: Audio Merger Lambda function ARN
+    Value: !GetAtt AudioMergerFn.Arn
 
 
 # Deploy stage:
