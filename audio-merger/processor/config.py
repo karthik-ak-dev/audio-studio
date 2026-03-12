@@ -3,13 +3,15 @@
 import os
 
 
-class ProcessorConfig:
+class ProcessorConfig:  # pylint: disable=too-few-public-methods
+    """Audio-merger processor configuration loaded from environment variables."""
     RECORDINGS_BUCKET: str = os.environ.get("RECORDINGS_BUCKET", "")
     SESSIONS_TABLE: str = os.environ.get("SESSIONS_TABLE", "")
     DAILY_DOMAIN: str = os.environ.get("DAILY_DOMAIN", "")
     PROCESSED_PREFIX: str = os.environ.get("PROCESSED_PREFIX", "")
     MERGE_DURATION: str = os.environ.get("MERGE_DURATION", "longest")
     ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "dev")
+    DYNAMODB_ENDPOINT: str = os.environ.get("DYNAMODB_ENDPOINT", "")
 
     @property
     def processed_prefix(self) -> str:

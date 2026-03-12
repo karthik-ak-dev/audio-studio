@@ -3,14 +3,12 @@
 ## Prerequisites
 
 - **Docker** — all services run via Docker Compose
-- **Daily.co account** — API key from https://dashboard.daily.co → Developers → API Keys
+- **Daily.co account** — API key from https://dashboard.daily.co → Developers → API Keys. Update the key directly in `docker-compose.yml` → `api` → `DAILY_API_KEY`
 
 ## Quick Start
 
 ```bash
-# 1. Create .env with your Daily.co API key (one-time)
-cp .env.example .env
-# Edit .env → set DAILY_API_KEY
+# 1. Update your Daily.co API key in docker-compose.yml → api → DAILY_API_KEY (one-time)
 
 # 2. Start everything
 make up
@@ -24,6 +22,7 @@ Open http://localhost:5173 in your browser.
 |---------|------|-----|
 | Web (Vite) | 5173 | http://localhost:5173 |
 | API (FastAPI) | 3001 | http://localhost:3001 |
+| Audio Merger | 3002 | http://localhost:3002 |
 | DynamoDB Local | 8000 | - |
 | DynamoDB Admin UI | 8001 | http://localhost:8001 |
 
@@ -82,6 +81,17 @@ aws dynamodb scan \
   --endpoint-url http://localhost:8000
 ```
 
+## AWS Credentials
+
+The audio-merger container needs real AWS credentials to access S3 (download raw tracks, upload processed WAVs). It mounts your host `~/.aws` directory read-only:
+
+```yaml
+volumes:
+  - ~/.aws:/root/.aws:ro
+```
+
+Ensure you have valid credentials configured (`aws configure`). DynamoDB is local — no real AWS access needed for that.
+
 ## What Works Locally vs What Needs Stage
 
 | Feature | Local | Needs Stage |
@@ -93,10 +103,12 @@ aws dynamodb scan \
 | UI flow end-to-end | Yes | - |
 | Webhooks (reconciliation) | With ngrok | - |
 | S3 recording upload | Yes* | - |
-| Audio merger (WAV output) | - | Yes |
-| `processing → completed` | - | Yes |
+| Audio merger (WAV output) | Yes** | - |
+| `processing → completed` | Yes** | - |
 
-*Recordings go to the existing S3 bucket (configured with Daily.co), but the audio-merger Lambda won't trigger locally.
+*Recordings go to the existing S3 bucket (configured with Daily.co).
+
+**Audio merger runs as a local HTTP server (port 3002). When the API receives the `recording.ready-to-download` webhook, it calls the audio-merger container directly via HTTP instead of invoking a Lambda.
 
 ## Session State Lifecycle
 
@@ -114,4 +126,4 @@ created → waiting_for_guest → ready → recording ⇄ paused → processing 
 | 5 | Host pauses (optional) | `POST /sessions/{id}/pause` | `paused` | 2 |
 | 6 | Host resumes (optional) | `POST /sessions/{id}/resume` | `recording` | 2 |
 | 7 | Host stops recording | `POST /sessions/{id}/stop` | `processing` | 2 |
-| 8 | Audio merger (stage) | Lambda | `completed` | 2 |
+| 8 | Audio merger | Lambda / local HTTP | `completed` | 2 |

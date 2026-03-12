@@ -27,6 +27,7 @@ import uuid
 import logging
 
 import boto3
+import httpx
 
 from app.config import settings
 from app.constants import SessionStatus, SESSION_ID_LENGTH
@@ -500,13 +501,28 @@ async def on_recording_ready_to_download(
             session_id, recording_id,
         )
 
-    # Invoke audio-merger Lambda asynchronously
-    if settings.audio_merger_function_name:
+    # Invoke audio-merger — HTTP locally, Lambda in deployed environments
+    payload = {
+        "session_id": session_id,
+        "domain": settings.daily_domain,
+    }
+
+    if settings.audio_merger_endpoint:
+        # Local dev: call audio-merger HTTP server directly
+        try:
+            resp = httpx.post(settings.audio_merger_endpoint, json=payload, timeout=300)
+            resp.raise_for_status()
+            logger.info(
+                "Webhook: invoked audio merger HTTP for session=%s status=%d",
+                session_id, resp.status_code,
+            )
+        except httpx.HTTPError as exc:
+            logger.error(
+                "Webhook: audio merger HTTP failed for session=%s — %s",
+                session_id, exc,
+            )
+    elif settings.audio_merger_function_name:
         lambda_client = boto3.client("lambda")
-        payload = {
-            "session_id": session_id,
-            "domain": settings.daily_domain,
-        }
         lambda_client.invoke(
             FunctionName=settings.audio_merger_function_name,
             InvocationType="Event",  # Async — fire and forget
@@ -518,7 +534,7 @@ async def on_recording_ready_to_download(
         )
     else:
         logger.warning(
-            "Webhook: AUDIO_MERGER_FUNCTION_NAME not set — skipping Lambda invoke for session=%s",
+            "Webhook: audio merger not configured — skipping invoke for session=%s",
             session_id,
         )
 

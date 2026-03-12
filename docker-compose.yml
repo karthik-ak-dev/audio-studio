@@ -3,7 +3,7 @@
 # ──────────────────────────────────────────────
 #
 # Usage:
-#   cp .env.example .env        # fill in DAILY_API_KEY
+#   Set DAILY_API_KEY in api environment below
 #   docker compose up            # start everything
 #   docker compose up -d         # start in background
 #   docker compose down          # stop everything
@@ -94,12 +94,13 @@ services:
     environment:
       SESSIONS_TABLE: audio-studio-sessions-dev
       RECORDINGS_BUCKET: auto-order-reports-prod
-      DAILY_API_KEY: ${DAILY_API_KEY}
+      DAILY_API_KEY: your-daily-api-key-here  # ← replace with your key
       DAILY_WEBHOOK_SECRET: ""
       DAILY_DOMAIN: ak-kgen
       ENVIRONMENT: dev
       FRONTEND_ORIGIN: http://localhost:5173
       DYNAMODB_ENDPOINT: http://dynamodb:8000
+      AUDIO_MERGER_ENDPOINT: http://audio-merger:3002/process
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
       AWS_DEFAULT_REGION: ap-south-1
@@ -111,6 +112,31 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ─── Audio Merger (local HTTP wrapper) ────────
+  audio-merger:
+    build:
+      context: ./audio-merger
+      dockerfile: Dockerfile
+    container_name: audio-merger
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./audio-merger/processor:/app/processor
+      - ./audio-merger/local_server.py:/app/local_server.py
+      - ~/.aws:/root/.aws:ro
+    environment:
+      RECORDINGS_BUCKET: ${RECORDINGS_BUCKET:-auto-order-reports-prod}
+      SESSIONS_TABLE: audio-studio-sessions-dev
+      DAILY_DOMAIN: ak-kgen
+      PROCESSED_PREFIX: ""
+      MERGE_DURATION: longest
+      ENVIRONMENT: dev
+      DYNAMODB_ENDPOINT: http://dynamodb:8000
+      AWS_DEFAULT_REGION: ap-south-1
+    depends_on:
+      dynamodb:
+        condition: service_healthy
 
   # ─── Web (Vite dev server) ───────────────────
   web:

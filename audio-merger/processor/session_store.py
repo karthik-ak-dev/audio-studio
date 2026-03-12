@@ -9,7 +9,12 @@ import boto3
 from processor.config import config
 
 logger: logging.Logger = logging.getLogger(__name__)
-dynamodb = boto3.resource("dynamodb")
+
+_kwargs: dict = {}
+if config.DYNAMODB_ENDPOINT:
+    _kwargs["endpoint_url"] = config.DYNAMODB_ENDPOINT
+
+dynamodb = boto3.resource("dynamodb", **_kwargs)
 table = dynamodb.Table(config.SESSIONS_TABLE)
 
 
