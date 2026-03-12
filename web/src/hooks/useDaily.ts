@@ -154,7 +154,7 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
       callRef.current = call;
 
       call.on("joined-meeting", () => {
-        setState((prev) => ({ ...prev, isJoined: true, error: null }));
+        setState((prev) => ({ ...prev, isJoined: true, networkQuality: "good" as NetworkQuality, error: null }));
         updateParticipants(call);
         syncRemoteAudio(call);
 

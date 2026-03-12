@@ -14,53 +14,40 @@ Step-by-step guide to set up Daily.co and AWS for raw-tracks audio recording. Fo
 
 1. In the Daily dashboard, go to **Developers → API Keys**
 2. Copy your API key
-3. Create a `.env` file in the project root (use `.env.example` as reference):
-   ```
-   DAILY_API_KEY=your-api-key-here
-   ```
-4. This key is used by the backend to create rooms, generate meeting tokens, and control recordings
+3. This key is passed as `DAILY_API_KEY` during deployment (see Makefile targets)
 
 ## 3. Deploy the AWS Infrastructure
 
 The SAM template (`infrastructure/template.yaml`) provisions all required AWS resources. Deploy it first — the outputs are needed for the next steps.
 
 ```bash
-cd infrastructure
-sam build
-sam deploy --guided
+# One-time: download static ffmpeg for Lambda
+make ffmpeg
+
+# Deploy backend
+make deploy-stage DAILY_API_KEY=your-api-key
 ```
-
-You'll be prompted for these parameters:
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `Environment` | `dev`, `stage`, or `prod` | `dev` |
-| `DailyApiKey` | API key from step 2 | (hidden input) |
-| `DailyWebhookSecret` | Webhook secret (step 5, can leave empty initially) | (hidden input) |
-| `DailyDomain` | Your Daily.co domain name | `my-domain` |
-| `FrontendOrigin` | CORS origin for your frontend | `http://localhost:5173` |
-| `MergeDuration` | Audio merge strategy | `longest` |
 
 ### What gets created
 
 | Resource | Purpose |
 |----------|---------|
-| **S3 Bucket** (`audio-recordings-{env}-{account-id}`) | Stores raw recordings from Daily and processed audio |
-| **IAM Role** (`DailyRecordingsRole-{env}`) | Cross-account role that lets Daily.co write to your S3 bucket |
-| **DynamoDB Table** (`audio-sessions-{env}`) | Session state, participant info, pause events |
+| **S3 Bucket** (`audio-studio-recordings-{env}-{account-id}`) | Stores raw recordings from Daily and processed audio |
+| **IAM Role** (`audio-studio-daily-role-{env}`) | Cross-account role that lets Daily.co write to your S3 bucket |
+| **DynamoDB Table** (`audio-studio-sessions-{env}`) | Session state, participant info, pause events |
 | **API Gateway** | HTTP API with CORS for the frontend |
 | **API Lambda** | FastAPI backend for session management |
-| **Audio Merger Lambda** | ffmpeg-based processor triggered by S3 uploads |
-| **ffmpeg Layer** | Static ffmpeg binary for arm64 Lambda |
+| **Audio Merger Lambda** | ffmpeg-based processor for merging/converting audio tracks |
+| **CloudFront + S3** | Frontend hosting |
 
 ### Note the stack outputs
 
 After deployment, grab these values — you'll need them next:
 
 ```bash
-# Get all outputs at once
 aws cloudformation describe-stacks \
-  --stack-name audio-recording-platform-{env} \
+  --stack-name audio-studio-{env} \
+  --region ap-south-1 \
   --query "Stacks[0].Outputs" \
   --output table
 ```
@@ -68,7 +55,8 @@ aws cloudformation describe-stacks \
 Key outputs:
 - `DailyRecordingsRoleArn` — needed for step 4
 - `RecordingsBucketName` — needed for step 4
-- `ApiUrl` — needed for frontend config
+- `ApiUrl` — needed for webhook setup (step 5)
+- `FrontendUrl` — your CloudFront URL
 
 ## 4. Configure Daily.co S3 Storage (Critical)
 
@@ -83,63 +71,66 @@ Daily.co's AWS account (`291871421005`) assumes the IAM role in your account via
 Replace the placeholder values with your actual stack outputs:
 
 ```bash
-curl -X POST "https://api.daily.co/v1/recordings/s3-bucket" \
+curl -X POST "https://api.daily.co/v1/" \
   -H "Authorization: Bearer <DAILY_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
-    "assume_role_arn": "<DailyRecordingsRoleArn from stack output>",
-    "bucket_name": "<RecordingsBucketName from stack output>",
-    "bucket_region": "<your-aws-region>",
-    "allow_api_access": true
+    "properties": {
+      "recordings_bucket": {
+        "bucket_name": "<RecordingsBucketName from stack output>",
+        "bucket_region": "ap-south-1",
+        "assume_role_arn": "<DailyRecordingsRoleArn from stack output>",
+        "allow_api_access": true
+      }
+    }
   }'
 ```
+
+This sets it at the **domain level** so all rooms use your bucket. Daily will upload a test file (`daily-co-test-upload.txt`) to verify permissions.
 
 ### Verify it worked
 
 ```bash
-curl "https://api.daily.co/v1/recordings/s3-bucket" \
-  -H "Authorization: Bearer <DAILY_API_KEY>"
+curl "https://api.daily.co/v1/" \
+  -H "Authorization: Bearer <DAILY_API_KEY>" | jq '.config.recordings_bucket'
 ```
 
 You should see your bucket name and role ARN in the response.
 
-## 5. Set Up Webhooks (Optional but Recommended)
+## 5. Set Up Webhooks
 
-Webhooks let Daily.co notify your API when recordings finish, participants join/leave, etc.
+Webhooks let Daily.co notify your API when recordings finish, participants join/leave, etc. The `recording.ready-to-download` webhook is **required** — it triggers the audio merger Lambda.
 
 1. In the Daily dashboard, go to **Developers → Webhooks**
 2. Add a webhook endpoint: `<ApiUrl from stack output>/webhooks/daily`
-3. Select relevant events (e.g. `recording.started`, `recording.stopped`, `participant.joined`, `participant.left`)
+3. Select these events:
+   - `recording.ready-to-download` (required — triggers audio processing)
+   - `recording.error`
+   - `participant.joined`
+   - `participant.left`
 4. Copy the **webhook signing secret**
-5. Update your SAM deployment with the secret:
+5. Redeploy with the secret:
    ```bash
-   sam deploy --parameter-overrides \
-     DailyApiKey=<your-key> \
-     DailyWebhookSecret=<your-webhook-secret> \
-     DailyDomain=<your-domain> \
-     FrontendOrigin=<your-frontend-url>
+   make deploy-stage DAILY_API_KEY=your-key DAILY_WEBHOOK_SECRET=your-secret
    ```
 
 ## 6. Deploy the Frontend
 
-Build the web app with the API Gateway URL:
-
 ```bash
-cd web
-VITE_API_BASE_URL=<ApiUrl from stack output> npm run build
+make deploy-stage-fe
 ```
 
-Deploy the `dist/` folder to your hosting provider (S3 + CloudFront, Vercel, Netlify, etc.).
+This auto-reads the API URL from CloudFormation outputs, builds the frontend, syncs to S3, and invalidates the CloudFront cache.
 
 ## 7. Verify End-to-End
 
-1. Open the frontend in a browser
+1. Open the frontend in a browser (CloudFront URL from stack outputs)
 2. Create a session (enter host & guest names)
 3. Copy the guest invite link and open in another browser/tab
 4. Join as guest, then start recording from the host view
 5. Speak for a few seconds, then end the session
 6. Check your S3 bucket — you should see raw audio files under `<your-domain>/session-<id>/`
-7. The Audio Merger Lambda should trigger automatically and write processed files to `processed/`
+7. The Audio Merger Lambda triggers automatically via the `recording.ready-to-download` webhook and writes processed files to `processed/session-<id>/`
 
 ---
 
@@ -153,13 +144,13 @@ Daily.co writes raw-tracks recordings with this key pattern:
 
 ### Identifying participants from S3 keys
 
-Each participant's audio track contains their Daily `connectionId`. To map a track to a participant, look up the `connectionId` in the session's `participant_connections` field in DynamoDB:
+Each participant's audio track contains their Daily `connectionId` (UUID). To map a track to a participant, look up the `connectionId` in the session's `connection_history` field in DynamoDB:
 
 ```json
 {
-  "participant_connections": {
-    "host-<userId>": "<connectionId-A>",
-    "guest-<sessionId>": "<connectionId-B>"
+  "connection_history": {
+    "<connectionId-A>": "host-<userId>",
+    "<connectionId-B>": "guest-<sessionId>"
   },
   "participants": {
     "host-<userId>": "Alice",
@@ -168,7 +159,7 @@ Each participant's audio track contains their Daily `connectionId`. To map a tra
 }
 ```
 
-Match the `connectionId` from the S3 key → find the `userId` → look up the display name in `participants`.
+Match the `connectionId` from the S3 key → find the `userId` via `connection_history` → look up the display name in `participants`.
 
 ---
 
@@ -209,7 +200,16 @@ Rooms are created programmatically via the Daily API. These settings are defined
 - Verify the `raw-tracks-audio-only` layout preset is used in the start recording call
 - Check the Daily dashboard → Recordings tab for per-recording status and error details
 
-### Audio Merger Lambda not triggering
-- Confirm the S3 event notification is set up (SAM template handles this)
-- The trigger filters on prefix `<domain>/` and suffix `audio` — verify your recordings match
-- Check CloudWatch logs for the Audio Merger Lambda
+### Audio Merger Lambda not processing
+- Ensure the `recording.ready-to-download` webhook is configured in Daily dashboard
+- Check CloudWatch logs for both the API Lambda and Audio Merger Lambda
+- Verify the session status is `processing` in DynamoDB (set by `end_session`)
+- You can manually trigger the merger for testing:
+  ```bash
+  aws lambda invoke \
+    --function-name audio-studio-merger-{env} \
+    --region ap-south-1 \
+    --payload '{"session_id":"<id>","domain":"<domain>"}' \
+    --cli-binary-format raw-in-base64-out \
+    /dev/stdout
+  ```
