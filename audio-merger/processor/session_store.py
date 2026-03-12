@@ -20,8 +20,20 @@ table = dynamodb.Table(config.SESSIONS_TABLE)
 
 def get_session(session_id: str) -> Optional[dict]:
     """Fetch full session record from DynamoDB."""
+    logger.info("session=%s DynamoDB: fetching session record", session_id)
     response = table.get_item(Key={"session_id": session_id})
-    return response.get("Item")
+    item = response.get("Item")
+    if item:
+        logger.info(
+            "session=%s DynamoDB: found — status=%s participants=%s connections=%d",
+            session_id,
+            item.get("status", "?"),
+            list(item.get("participants", {}).keys()),
+            len(item.get("connection_history", {})),
+        )
+    else:
+        logger.warning("session=%s DynamoDB: session not found", session_id)
+    return item
 
 
 def update_status(session_id: str, status: str, **extra: str) -> None:
@@ -43,4 +55,5 @@ def update_status(session_id: str, status: str, **extra: str) -> None:
         ExpressionAttributeNames=names,
         ExpressionAttributeValues=values,
     )
-    logger.info("Session %s → %s", session_id, status)
+    extra_info = f" ({', '.join(f'{k}={v[:60]}' for k, v in extra.items())})" if extra else ""
+    logger.info("session=%s DynamoDB: status → %s%s", session_id, status, extra_info)

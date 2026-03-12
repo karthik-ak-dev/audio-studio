@@ -23,8 +23,20 @@ from processor.s3_client import (
 from processor.merger import merge_tracks, concat_and_convert
 from processor.session_store import get_session, update_status
 
-logger: logging.Logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# ── Logging setup ─────────────────────────────────
+# Format matches API layer — all logs include session=<id> for CloudWatch search.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s %(asctime)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    force=True,
+)
+# Suppress noisy libraries
+logging.getLogger("boto3").setLevel(logging.WARNING)
+logging.getLogger("botocore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+logger: logging.Logger = logging.getLogger("audio-merger")
 
 # Regex to extract connectionId from Daily.co S3 key:
 #   {domain}/session-{id}/{ts}-{connectionId}-cam-audio-{trackTs}
@@ -42,6 +54,7 @@ def _extract_connection_id(s3_key: str) -> Optional[str]:
 
 
 def _build_participant_map(
+    session_id: str,
     session: dict,
 ) -> dict[str, dict[str, str]]:
     """Build a connectionId → {role, name} map from session data.
@@ -58,6 +71,11 @@ def _build_participant_map(
         name = names.get(user_id, role.capitalize())
         result[conn_id] = {"role": role, "name": name}
 
+    logger.info(
+        "session=%s Participant map: %d connections → %s",
+        session_id, len(result),
+        {cid[:8]: f"{info['role']}-{info['name']}" for cid, info in result.items()},
+    )
     return result
 
 
@@ -69,6 +87,7 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _group_tracks_by_participant(
+    session_id: str,
     track_keys: list[str],
     participant_map: dict[str, dict[str, str]],
 ) -> dict[str, list[str]]:
@@ -96,8 +115,8 @@ def _group_tracks_by_participant(
             group_key = f"{fallback}-speaker-{unmatched_index + 1}"
             unmatched_index += 1
             logger.warning(
-                "Track connectionId %s not in map, assigned to %s",
-                conn_id, group_key,
+                "session=%s Track connectionId %s not in participant map, assigned to %s (key=%s)",
+                session_id, conn_id, group_key, s3_key,
             )
         groups[group_key].append(s3_key)
 
@@ -117,12 +136,13 @@ def _process_session(
     Then merge participant WAVs into combined.wav.
     """
     temp_files: list[str] = []
+    logger.info("session=%s Processing started: %d tracks", session_id, len(track_keys))
 
     try:
         # Group tracks by participant
-        groups = _group_tracks_by_participant(track_keys, participant_map)
+        groups = _group_tracks_by_participant(session_id, track_keys, participant_map)
         logger.info(
-            "Session %s: track groups — %s",
+            "session=%s Track groups: %s",
             session_id,
             {k: len(v) for k, v in groups.items()},
         )
@@ -130,30 +150,49 @@ def _process_session(
         participant_wavs: list[str] = []
 
         for group_name, group_keys in sorted(groups.items()):
+            logger.info(
+                "session=%s Processing participant: %s (%d segments)",
+                session_id, group_name, len(group_keys),
+            )
+
             # Download all raw segments for this participant
             local_segments: list[str] = []
             for i, s3_key in enumerate(group_keys):
                 local_path = f"/tmp/{group_name}_seg{i}.webm"
-                download_track(s3_key, local_path)
+                download_track(session_id, s3_key, local_path)
                 local_segments.append(local_path)
                 temp_files.append(local_path)
 
+            logger.info(
+                "session=%s Downloaded %d segments for %s",
+                session_id, len(local_segments), group_name,
+            )
+
             # Single ffmpeg pass: decode + concat + convert → one WAV
             output_wav = f"/tmp/{group_name}.wav"
-            concat_and_convert(local_segments, output_wav)
+            concat_and_convert(session_id, local_segments, output_wav)
             participant_wavs.append(output_wav)
             temp_files.append(output_wav)
 
         # Merge all participants into combined
         combined_path = "/tmp/combined.wav"
-        merge_tracks(participant_wavs, combined_path)
+        logger.info(
+            "session=%s Merging %d participant WAVs into combined.wav",
+            session_id, len(participant_wavs),
+        )
+        merge_tracks(session_id, participant_wavs, combined_path)
         temp_files.append(combined_path)
 
         # Upload: individual participant files + combined
         output_prefix = f"{config.processed_prefix}session-{session_id}"
-        for wav_path in [*participant_wavs, combined_path]:
+        upload_paths = [*participant_wavs, combined_path]
+        logger.info(
+            "session=%s Uploading %d files to %s/",
+            session_id, len(upload_paths), output_prefix,
+        )
+        for wav_path in upload_paths:
             filename = os.path.basename(wav_path)
-            upload_file(wav_path, f"{output_prefix}/{filename}")
+            upload_file(session_id, wav_path, f"{output_prefix}/{filename}")
 
         # Update session status
         update_status(
@@ -163,19 +202,26 @@ def _process_session(
                 f"s3://{config.RECORDINGS_BUCKET}/{output_prefix}/"
             ),
         )
-        logger.info("Session %s: processing complete", session_id)
+        logger.info("session=%s Processing complete", session_id)
 
     except Exception as exc:
-        logger.error("Session %s: processing failed — %s", session_id, exc)
+        logger.error(
+            "session=%s Processing FAILED — %s: %s",
+            session_id, type(exc).__name__, exc,
+        )
         update_status(session_id, "error", error_message=str(exc)[:500])
         raise
 
     finally:
+        cleaned = 0
         for path in temp_files:
             try:
                 os.remove(path)
+                cleaned += 1
             except OSError:
                 pass
+        logger.info("session=%s Cleaned up %d/%d temp files", session_id, cleaned, len(temp_files))
+
 
 def handler(event: dict, _context: object) -> dict:
     """Direct invocation handler — called by API after recording.ready-to-download.
@@ -185,31 +231,38 @@ def handler(event: dict, _context: object) -> dict:
     session_id: str = event["session_id"]
     domain: str = event["domain"]
 
-    logger.info("Invoked for session=%s domain=%s", session_id, domain)
+    logger.info(
+        "session=%s ===== AUDIO MERGER INVOKED ===== domain=%s bucket=%s",
+        session_id, domain, config.RECORDINGS_BUCKET,
+    )
 
     # Idempotency guard — skip if already processed
     if processed_exists(session_id):
-        logger.info("Session %s already processed, skipping", session_id)
+        logger.info("session=%s Already processed — skipping", session_id)
         return {"status": "already_processed"}
 
     # Load session for participant mapping
     session = get_session(session_id)
     if not session:
-        logger.error("Session %s not found in DynamoDB", session_id)
+        logger.error("session=%s Session not found in DynamoDB — cannot process", session_id)
         return {"status": "session_not_found"}
 
-    participant_map = _build_participant_map(session)
+    participant_map = _build_participant_map(session_id, session)
 
     # List all audio tracks for this session
     room_prefix = f"{domain}/session-{session_id}/"
-    tracks = list_audio_tracks(room_prefix)
+    tracks = list_audio_tracks(session_id, room_prefix)
 
     if not tracks:
-        logger.error("Session %s: no audio tracks found at %s", session_id, room_prefix)
+        logger.error(
+            "session=%s No audio tracks found at s3://%s/%s",
+            session_id, config.RECORDINGS_BUCKET, room_prefix,
+        )
         update_status(session_id, "error", error_message="No audio tracks found in S3")
         return {"status": "no_tracks"}
 
-    logger.info("Session %s: %d tracks — processing", session_id, len(tracks))
+    logger.info("session=%s Found %d tracks — starting processing pipeline", session_id, len(tracks))
     _process_session(session_id, tracks, participant_map)
 
+    logger.info("session=%s ===== AUDIO MERGER DONE =====", session_id)
     return {"status": "ok"}

@@ -11,38 +11,36 @@ logger: logging.Logger = logging.getLogger(__name__)
 s3 = boto3.client("s3")
 
 
-def list_audio_tracks(room_prefix: str) -> list[str]:
+def list_audio_tracks(session_id: str, room_prefix: str) -> list[str]:
     """List all audio track files for a recording session."""
+    logger.info(
+        "session=%s S3: listing tracks bucket=%s prefix=%s",
+        session_id, config.RECORDINGS_BUCKET, room_prefix,
+    )
     response = s3.list_objects_v2(
         Bucket=config.RECORDINGS_BUCKET,
         Prefix=room_prefix,
     )
     contents = response.get("Contents", [])
-    tracks = [
-        obj["Key"]
-        for obj in contents
-        if AUDIO_TRACK_IDENTIFIER in obj["Key"]
-    ]
-    logger.info("Found %d audio tracks under %s", len(tracks), room_prefix)
+    all_keys = [obj["Key"] for obj in contents]
+    tracks = [key for key in all_keys if AUDIO_TRACK_IDENTIFIER in key]
+    logger.info(
+        "session=%s S3: found %d objects, %d audio tracks under %s",
+        session_id, len(all_keys), len(tracks), room_prefix,
+    )
     return sorted(tracks)
 
 
-def download_track(s3_key: str, local_path: str) -> None:
+def download_track(session_id: str, s3_key: str, local_path: str) -> None:
     """Download a single track from S3 to local filesystem."""
     s3.download_file(config.RECORDINGS_BUCKET, s3_key, local_path)
-    logger.info(
-        "Downloaded s3://%s/%s → %s",
-        config.RECORDINGS_BUCKET, s3_key, local_path,
-    )
+    logger.info("session=%s S3: downloaded %s", session_id, s3_key)
 
 
-def upload_file(local_path: str, s3_key: str) -> None:
+def upload_file(session_id: str, local_path: str, s3_key: str) -> None:
     """Upload a processed file to S3."""
     s3.upload_file(local_path, config.RECORDINGS_BUCKET, s3_key)
-    logger.info(
-        "Uploaded %s → s3://%s/%s",
-        local_path, config.RECORDINGS_BUCKET, s3_key,
-    )
+    logger.info("session=%s S3: uploaded → %s", session_id, s3_key)
 
 
 def processed_exists(session_id: str) -> bool:
@@ -53,4 +51,9 @@ def processed_exists(session_id: str) -> bool:
         Prefix=key,
         MaxKeys=1,
     )
-    return bool(response.get("Contents"))
+    exists = bool(response.get("Contents"))
+    logger.info(
+        "session=%s S3: idempotency check key=%s exists=%s",
+        session_id, key, exists,
+    )
+    return exists

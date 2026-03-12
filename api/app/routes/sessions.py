@@ -20,6 +20,8 @@ Endpoints:
   GET  /sessions/user/{host_user_id} → List sessions for a host
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from app.types.requests import CreateSessionRequest, JoinRequest, LeaveRequest
@@ -34,6 +36,7 @@ from app.services.session_service import (
 )
 from app.services import session_service
 
+logger: logging.Logger = logging.getLogger(__name__)
 router: APIRouter = APIRouter()
 
 
@@ -94,6 +97,7 @@ async def start_recording(session_id: str) -> SessionActionResponse:
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
     except InvalidSessionStateError as exc:
+        logger.warning("Start recording rejected: session=%s — %s", session_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -105,6 +109,7 @@ async def end_session(session_id: str) -> SessionActionResponse:
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
     except InvalidSessionStateError as exc:
+        logger.warning("End session rejected: session=%s — %s", session_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -116,6 +121,7 @@ async def pause_session(session_id: str) -> SessionActionResponse:
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
     except InvalidSessionStateError as exc:
+        logger.warning("Pause rejected: session=%s — %s", session_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -127,6 +133,7 @@ async def resume_session(session_id: str) -> SessionActionResponse:
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
     except InvalidSessionStateError as exc:
+        logger.warning("Resume rejected: session=%s — %s", session_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

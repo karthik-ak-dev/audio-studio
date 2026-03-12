@@ -123,6 +123,11 @@ async def join_session(session_id: str, req: JoinRequest) -> SessionActionRespon
       count == 1, status == created     → waiting_for_guest
       count >= 2, status <= waiting     → ready
     """
+    logger.info(
+        "Join: session=%s user=%s conn=%s name=%s",
+        session_id, req.user_id, req.connection_id, req.user_name,
+    )
+
     # Verify session exists before the atomic update
     existing: Session | None = session_repo.get_by_id(session_id)
     if existing is None:
@@ -271,6 +276,11 @@ async def end_session(session_id: str) -> SessionActionResponse:
     if session.status not in (SessionStatus.RECORDING, SessionStatus.PAUSED):
         raise InvalidSessionStateError(session_id, session.status, "end session")
 
+    logger.info(
+        "End session: session=%s current_status=%s room=%s — stopping recording",
+        session_id, session.status.value, session.daily_room_name,
+    )
+
     # Always stop — this is the ONLY place stop_recording is called
     await daily_client.stop_recording(session.daily_room_name)
 
@@ -294,6 +304,8 @@ async def leave_session(session_id: str, req: LeaveRequest) -> SessionActionResp
     If recording and count drops below 2 → auto-pause (NOT processing).
     If not recording and count drops below 2 → regress ready → waiting_for_guest.
     """
+    logger.info("Leave: session=%s user=%s", session_id, req.user_id)
+
     existing: Session | None = session_repo.get_by_id(session_id)
     if existing is None:
         raise SessionNotFoundError(session_id)
@@ -522,6 +534,10 @@ async def on_recording_ready_to_download(
                 session_id, exc,
             )
     elif settings.audio_merger_function_name:
+        logger.info(
+            "Webhook: invoking audio merger Lambda session=%s function=%s payload=%s",
+            session_id, settings.audio_merger_function_name, payload,
+        )
         lambda_client = boto3.client("lambda")
         lambda_client.invoke(
             FunctionName=settings.audio_merger_function_name,
@@ -529,7 +545,7 @@ async def on_recording_ready_to_download(
             Payload=json.dumps(payload),
         )
         logger.info(
-            "Webhook: invoked audio merger Lambda for session=%s",
+            "Webhook: audio merger Lambda invoked (async) session=%s",
             session_id,
         )
     else:
@@ -537,11 +553,6 @@ async def on_recording_ready_to_download(
             "Webhook: audio merger not configured — skipping invoke for session=%s",
             session_id,
         )
-
-    logger.info(
-        "Webhook: recording.ready-to-download session=%s status=%s",
-        session_id, session.status,
-    )
 
 
 def on_recording_error(session_id: str, error_msg: str) -> None:

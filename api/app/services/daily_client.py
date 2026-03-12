@@ -34,6 +34,7 @@ class DailyClient:
     async def create_room(self, session_id: str) -> dict[str, object]:
         """Create an audio-only, 2-person private room."""
         room_name: str = f"session-{session_id}"
+        logger.info("Daily API: creating room session=%s room=%s", session_id, room_name)
         async with httpx.AsyncClient() as client:
             response: httpx.Response = await client.post(
                 f"{self.base_url}/rooms",
@@ -57,7 +58,7 @@ class DailyClient:
             )
             response.raise_for_status()
             data: dict[str, object] = response.json()
-            logger.info("Room created: %s", room_name)
+            logger.info("Daily API: room created session=%s room=%s", session_id, room_name)
             return data
 
     async def create_token(
@@ -94,11 +95,15 @@ class DailyClient:
             )
             response.raise_for_status()
             token: str = response.json()["token"]
-            logger.info("Token created for %s (owner=%s)", user_name, is_owner)
+            logger.info(
+                "Daily API: token created room=%s user=%s owner=%s",
+                room_name, user_id, is_owner,
+            )
             return token
 
     async def start_recording(self, room_name: str) -> dict[str, object]:
         """Start raw-tracks audio-only recording."""
+        logger.info("Daily API: starting recording room=%s", room_name)
         async with httpx.AsyncClient() as client:
             response: httpx.Response = await client.post(
                 f"{self.base_url}/rooms/{room_name}/recordings/start",
@@ -114,13 +119,14 @@ class DailyClient:
             response.raise_for_status()
             data: dict[str, object] = response.json()
             logger.info(
-                "Recording started: room=%s id=%s",
+                "Daily API: recording started room=%s recording_id=%s",
                 room_name, data.get("recordingId"),
             )
             return data
 
     async def stop_recording(self, room_name: str) -> Optional[dict[str, object]]:
         """Stop the current recording. Returns None if no active recording."""
+        logger.info("Daily API: stopping recording room=%s", room_name)
         async with httpx.AsyncClient() as client:
             response: httpx.Response = await client.post(
                 f"{self.base_url}/rooms/{room_name}/recordings/stop",
@@ -128,10 +134,10 @@ class DailyClient:
                 timeout=10.0,
             )
             if response.status_code == 400:
-                logger.warning("No active recording to stop for room: %s", room_name)
+                logger.warning("Daily API: no active recording to stop room=%s", room_name)
                 return None
             response.raise_for_status()
-            logger.info("Recording stopped for room: %s", room_name)
+            logger.info("Daily API: recording stopped room=%s", room_name)
             return response.json()
 
     async def delete_room(self, room_name: str) -> None:
@@ -143,10 +149,10 @@ class DailyClient:
                 timeout=10.0,
             )
             if response.status_code == 404:
-                logger.info("Room already deleted: %s", room_name)
+                logger.info("Daily API: room already deleted room=%s", room_name)
                 return
             response.raise_for_status()
-            logger.info("Room deleted: %s", room_name)
+            logger.info("Daily API: room deleted room=%s", room_name)
 
     async def get_recording(self, recording_id: str) -> dict[str, object]:
         """Get recording metadata including S3 keys and track info."""

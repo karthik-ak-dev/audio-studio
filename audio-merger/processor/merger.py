@@ -16,7 +16,9 @@ from processor.ffmpeg import run_ffmpeg
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def concat_and_convert(input_paths: list[str], output_path: str) -> None:
+def concat_and_convert(
+    session_id: str, input_paths: list[str], output_path: str,
+) -> None:
     """Decode, concatenate, and convert multiple audio segments into one WAV.
 
     Accepts any ffmpeg-supported input format (WebM/Opus, WAV, etc.).
@@ -25,6 +27,11 @@ def concat_and_convert(input_paths: list[str], output_path: str) -> None:
     Used when a participant disconnects and reconnects — each connection produces
     a separate track file. This decodes and stitches them together chronologically.
     """
+    logger.info(
+        "session=%s ffmpeg: concat+convert %d segment(s) → %s",
+        session_id, len(input_paths), output_path,
+    )
+
     inputs: list[str] = []
     for path in input_paths:
         inputs.extend(["-i", path])
@@ -58,21 +65,29 @@ def concat_and_convert(input_paths: list[str], output_path: str) -> None:
             output_path,
         ]
 
-    run_ffmpeg(cmd, "ffmpeg concat+convert")
+    run_ffmpeg(cmd, f"session={session_id} ffmpeg concat+convert")
     logger.info(
-        "Concat+convert %d segment(s) → %s", len(input_paths), output_path,
+        "session=%s ffmpeg: concat+convert done → %s",
+        session_id, output_path,
     )
 
 
-def merge_tracks(wav_paths: list[str], output_path: str) -> None:
+def merge_tracks(
+    session_id: str, wav_paths: list[str], output_path: str,
+) -> None:
     """Merge multiple mono WAV files into a single mono mix."""
     duration: str = config.MERGE_DURATION
     if duration not in VALID_MERGE_DURATIONS:
         logger.warning(
-            "Invalid MERGE_DURATION '%s', falling back to '%s'",
-            duration, DEFAULT_MERGE_DURATION,
+            "session=%s ffmpeg: invalid MERGE_DURATION '%s', falling back to '%s'",
+            session_id, duration, DEFAULT_MERGE_DURATION,
         )
         duration = DEFAULT_MERGE_DURATION
+
+    logger.info(
+        "session=%s ffmpeg: merging %d tracks → %s (duration=%s)",
+        session_id, len(wav_paths), output_path, duration,
+    )
 
     if len(wav_paths) < 2:
         cmd: list[str] = [
@@ -96,5 +111,5 @@ def merge_tracks(wav_paths: list[str], output_path: str) -> None:
             output_path,
         ]
 
-    run_ffmpeg(cmd, "ffmpeg merge")
-    logger.info("Merged %d tracks → %s", len(wav_paths), output_path)
+    run_ffmpeg(cmd, f"session={session_id} ffmpeg merge")
+    logger.info("session=%s ffmpeg: merge done → %s", session_id, output_path)
