@@ -17,8 +17,7 @@ from processor.s3_client import (
     upload_file,
     processed_exists,
 )
-from processor.converter import webm_to_wav
-from processor.merger import merge_tracks, concat_tracks
+from processor.merger import merge_tracks, concat_and_convert
 from processor.session_store import get_session, update_status
 
 logger: logging.Logger = logging.getLogger()
@@ -186,7 +185,13 @@ def _process_session(
     track_keys: list[str],
     participant_map: dict[str, dict[str, str]],
 ) -> None:
-    """Download all tracks, group by participant, concat segments, merge, upload."""
+    """Download all tracks, group by participant, concat+convert, merge, upload.
+
+    Pipeline per participant (single ffmpeg pass):
+      WebM segments → [decode + concat + convert] → one WAV per participant
+
+    Then merge participant WAVs into combined.wav.
+    """
     temp_files: list[str] = []
 
     try:
@@ -198,39 +203,31 @@ def _process_session(
             {k: len(v) for k, v in groups.items()},
         )
 
-        consolidated_wavs: list[str] = []
-        consolidated_names: list[str] = []
+        participant_wavs: list[str] = []
 
         for group_name, group_keys in sorted(groups.items()):
-            # Download all segments for this participant
-            segment_wavs: list[str] = []
+            # Download all raw segments for this participant
+            local_segments: list[str] = []
             for i, s3_key in enumerate(group_keys):
-                local_webm = f"/tmp/{group_name}_seg{i}.webm"
-                download_track(s3_key, local_webm)
-                temp_files.append(local_webm)
+                local_path = f"/tmp/{group_name}_seg{i}.webm"
+                download_track(s3_key, local_path)
+                local_segments.append(local_path)
+                temp_files.append(local_path)
 
-                # Convert each segment to WAV
-                local_wav = f"/tmp/{group_name}_seg{i}.wav"
-                webm_to_wav(local_webm, local_wav)
-                segment_wavs.append(local_wav)
-                temp_files.append(local_wav)
-
-            # Concatenate segments into one file per participant
-            concat_path = f"/tmp/{group_name}.wav"
-            concat_tracks(segment_wavs, concat_path)
-            temp_files.append(concat_path)
-
-            consolidated_wavs.append(concat_path)
-            consolidated_names.append(group_name)
+            # Single ffmpeg pass: decode + concat + convert → one WAV
+            output_wav = f"/tmp/{group_name}.wav"
+            concat_and_convert(local_segments, output_wav)
+            participant_wavs.append(output_wav)
+            temp_files.append(output_wav)
 
         # Merge all participants into combined
         combined_path = "/tmp/combined.wav"
-        merge_tracks(consolidated_wavs, combined_path)
+        merge_tracks(participant_wavs, combined_path)
         temp_files.append(combined_path)
 
         # Upload: individual participant files + combined
-        output_prefix = f"{config.PROCESSED_PREFIX}session-{session_id}"
-        for wav_path in [*consolidated_wavs, combined_path]:
+        output_prefix = f"{config.processed_prefix}session-{session_id}"
+        for wav_path in [*participant_wavs, combined_path]:
             filename = os.path.basename(wav_path)
             upload_file(wav_path, f"{output_prefix}/{filename}")
 

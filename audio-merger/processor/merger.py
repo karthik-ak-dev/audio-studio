@@ -1,7 +1,6 @@
 """ffmpeg-based audio track concatenation and merging."""
 
 import logging
-import shutil
 
 from processor.config import config
 from processor.constants import (
@@ -17,41 +16,52 @@ from processor.ffmpeg import run_ffmpeg
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def concat_tracks(wav_paths: list[str], output_path: str) -> None:
-    """Concatenate multiple WAV segments from the same participant into one file.
+def concat_and_convert(input_paths: list[str], output_path: str) -> None:
+    """Decode, concatenate, and convert multiple audio segments into one WAV.
+
+    Accepts any ffmpeg-supported input format (WebM/Opus, WAV, etc.).
+    Single ffmpeg pass — no intermediate files needed.
 
     Used when a participant disconnects and reconnects — each connection produces
-    a separate track file. This stitches them together chronologically.
+    a separate track file. This decodes and stitches them together chronologically.
     """
-    if len(wav_paths) == 1:
-        shutil.copy2(wav_paths[0], output_path)
-        logger.info("Single segment, copied %s → %s", wav_paths[0], output_path)
-        return
-
-    # Build ffmpeg concat filter: input all files, concatenate audio streams
     inputs: list[str] = []
-    for path in wav_paths:
+    for path in input_paths:
         inputs.extend(["-i", path])
 
-    filter_expr = (
-        f"concat=n={len(wav_paths)}:v=0:a=1,"
-        f"aformat=sample_fmts=s16"
-        f":sample_rates={SAMPLE_RATE}"
-        f":channel_layouts=mono"
+    if len(input_paths) == 1:
+        # Single segment — just convert (no concat filter needed)
+        cmd: list[str] = [
+            FFMPEG_PATH, "-y",
+            *inputs,
+            "-vn",
+            "-acodec", CODEC,
+            "-ar", str(SAMPLE_RATE),
+            "-ac", str(CHANNELS),
+            output_path,
+        ]
+    else:
+        # Multiple segments — concat + convert in one pass
+        filter_expr = (
+            f"concat=n={len(input_paths)}:v=0:a=1,"
+            f"aformat=sample_fmts=s16"
+            f":sample_rates={SAMPLE_RATE}"
+            f":channel_layouts=mono"
+        )
+        cmd = [
+            FFMPEG_PATH, "-y",
+            *inputs,
+            "-filter_complex", filter_expr,
+            "-acodec", CODEC,
+            "-ar", str(SAMPLE_RATE),
+            "-ac", str(CHANNELS),
+            output_path,
+        ]
+
+    run_ffmpeg(cmd, "ffmpeg concat+convert")
+    logger.info(
+        "Concat+convert %d segment(s) → %s", len(input_paths), output_path,
     )
-
-    cmd: list[str] = [
-        FFMPEG_PATH, "-y",
-        *inputs,
-        "-filter_complex", filter_expr,
-        "-acodec", CODEC,
-        "-ar", str(SAMPLE_RATE),
-        "-ac", str(CHANNELS),
-        output_path,
-    ]
-
-    run_ffmpeg(cmd, "ffmpeg concat")
-    logger.info("Concatenated %d segments → %s", len(wav_paths), output_path)
 
 
 def merge_tracks(wav_paths: list[str], output_path: str) -> None:

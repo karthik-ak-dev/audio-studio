@@ -47,7 +47,7 @@ def upload_file(local_path: str, s3_key: str) -> None:
 
 def processed_exists(session_id: str) -> bool:
     """Check if this session has already been processed."""
-    key = f"{config.PROCESSED_PREFIX}session-{session_id}/combined.wav"
+    key = f"{config.processed_prefix}session-{session_id}/combined.wav"
     response = s3.list_objects_v2(
         Bucket=config.RECORDINGS_BUCKET,
         Prefix=key,
