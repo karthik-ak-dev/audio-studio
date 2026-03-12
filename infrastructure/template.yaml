@@ -227,7 +227,7 @@ Resources:
   AudioStudioApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      StageName: !Ref Environment
+      StageName: $default
       CorsConfiguration:
         AllowOrigins:
           - !If
@@ -330,7 +330,7 @@ Outputs:
 
   ApiUrl:
     Description: API Gateway endpoint URL
-    Value: !Sub "https://${AudioStudioApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+    Value: !Sub "https://${AudioStudioApi}.execute-api.${AWS::Region}.amazonaws.com"
 
   FrontendUrl:
     Description: CloudFront URL for the frontend
@@ -371,11 +371,27 @@ Outputs:
 
 
 # Deploy stage:
-# cd infrastructure && sam build --config-env stage --use-container
+  # cd infrastructure && sam build --config-env stage --use-container
 
-# Deploy (pass your secrets)
-# sam deploy --config-env stage --parameter-overrides \
-#   DailyApiKey=62e43afcba46bb216b37dc6b97c98dff0936e2483090a4b67f743b593faf1628 \
-#   DailyWebhookSecret=YOUR_DAILY_WEBHOOK_SECRET \
-#   DailyDomain=ak-kgen \
-#   Environment=stage
+  # sam deploy --config-env stage --parameter-overrides \
+  #   DailyApiKey=62e43afcba46bb216b37dc6b97c98dff0936e2483090a4b67f743b593faf1628 \
+  #   DailyWebhookSecret=YOUR_DAILY_WEBHOOK_SECRET \
+  #   DailyDomain=ak-kgen \
+  #   Environment=stage
+
+  # Get Output values
+  # aws cloudformation describe-stacks \
+  #   --stack-name audio-studio-stage \
+  #   --region ap-south-1 \
+  #   --query "Stacks[0].Outputs" \
+  #   --output table
+
+  # Build FE
+  # cd web
+  # VITE_API_BASE_URL=https://3w9acjijq0.execute-api.ap-south-1.amazonaws.com npm run build
+
+  # Push build to S3
+  # aws s3 sync dist/ s3://audio-studio-web-stage-035475678676/ --delete
+
+  # Invalidate CF Cached 
+  # aws cloudfront create-invalidation --distribution-id E29OTQQV4EV495 --paths "/*"
