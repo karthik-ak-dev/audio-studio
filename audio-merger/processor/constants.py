@@ -11,7 +11,7 @@ FFMPEG_PATH: str = "/opt/bin/ffmpeg"
 
 # Processing
 FFMPEG_TIMEOUT_SEC: int = 600
-EXPECTED_TRACKS_PER_SESSION: int = 2
+MIN_PARTICIPANTS: int = 2  # Wait for tracks from at least 2 distinct participants
 
 # Merge duration strategy (longest | shortest | first)
 VALID_MERGE_DURATIONS: set[str] = {"longest", "shortest", "first"}

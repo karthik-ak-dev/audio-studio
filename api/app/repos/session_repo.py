@@ -51,10 +51,11 @@ def add_participant(
 ) -> Session:
     """Atomically add a participant — idempotent, safe for duplicate calls.
 
-    Three atomic operations in one update:
+    Four atomic operations in one update:
     1. ADD user_id to active_participants set (idempotent — no-op if already present)
     2. SET participant_connections[user_id] = connection_id (overwrites on reconnect)
     3. SET participants[user_id] = user_name (write-once via if_not_exists)
+    4. SET connection_history[connection_id] = user_id (append-only — audio-merger uses this)
 
     Returns the full updated session (ALL_NEW) so the caller can read set size
     and decide on status transitions.
@@ -65,12 +66,17 @@ def add_participant(
             ADD active_participants :user_set
             SET participant_connections.#uid = :conn_id,
                 participants.#uid = if_not_exists(participants.#uid, :name),
+                connection_history.#conn_id = :user_id,
                 updated_at = :now
         """,
-        ExpressionAttributeNames={"#uid": user_id},
+        ExpressionAttributeNames={
+            "#uid": user_id,
+            "#conn_id": connection_id,
+        },
         ExpressionAttributeValues={
             ":user_set": {user_id},
             ":conn_id": connection_id,
+            ":user_id": user_id,
             ":name": user_name,
             ":now": now_iso(),
         },

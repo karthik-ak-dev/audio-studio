@@ -28,6 +28,9 @@ class SessionResponse(BaseModel):
     active_participants: list[str]
     participants: dict[str, str]
 
+    # Connection history — connectionId → userId (for audio-merger track mapping)
+    connection_history: dict[str, str] = {}
+
     # Recording state
     recording_started_at: Optional[str] = None
     recording_stopped_at: Optional[str] = None

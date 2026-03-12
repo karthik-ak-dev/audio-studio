@@ -1,9 +1,10 @@
 """Session entity model — represents the DynamoDB item shape.
 
-Three participant tracking fields (see ARCHITECTURE.md):
+Four participant tracking fields (see ARCHITECTURE.md):
   active_participants: Set — user IDs currently connected (ADD/DELETE = idempotent)
   participant_connections: Map — user_id → latest Daily connection_id (stale detection)
   participants: Map — user_id → display name (roster, write-once, never removed)
+  connection_history: Map — connectionId → userId (append-only, used by audio-merger)
 """
 
 from dataclasses import dataclass, field
@@ -30,10 +31,11 @@ class Session:  # pylint: disable=too-many-instance-attributes
     daily_room_url: str
     status: SessionStatus
 
-    # Participant tracking (3 fields — see module docstring)
+    # Participant tracking (4 fields — see module docstring)
     active_participants: set[str] = field(default_factory=set)
     participant_connections: dict[str, str] = field(default_factory=dict)
     participants: dict[str, str] = field(default_factory=dict)
+    connection_history: dict[str, str] = field(default_factory=dict)
 
     # Optimistic locking
     version: int = 0
@@ -82,6 +84,7 @@ class Session:  # pylint: disable=too-many-instance-attributes
         # Maps — store even if empty (DynamoDB supports empty maps)
         item["participant_connections"] = self.participant_connections
         item["participants"] = self.participants
+        item["connection_history"] = self.connection_history
 
         # Pause events — always include (empty list is valid)
         item["pause_events"] = self.pause_events
@@ -115,6 +118,9 @@ class Session:  # pylint: disable=too-many-instance-attributes
         raw_roster = item.get("participants")
         roster: dict[str, str] = dict(raw_roster) if raw_roster else {}  # type: ignore[arg-type]
 
+        raw_history = item.get("connection_history")
+        conn_history: dict[str, str] = dict(raw_history) if raw_history else {}  # type: ignore[arg-type]
+
         # Pause events — list of {paused_at, resumed_at} dicts
         raw_pause_events = item.get("pause_events")
         pause_events: list[dict[str, Optional[str]]] = (
@@ -132,6 +138,7 @@ class Session:  # pylint: disable=too-many-instance-attributes
             active_participants=active_set,
             participant_connections=connections,
             participants=roster,
+            connection_history=conn_history,
             version=int(item.get("version", 0)),  # type: ignore[arg-type]
             recording_id=str(item.get("recording_id", "")),
             pause_events=pause_events,

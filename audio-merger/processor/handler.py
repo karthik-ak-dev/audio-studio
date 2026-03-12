@@ -4,11 +4,12 @@ import os
 import re
 import logging
 from typing import Optional
+from collections import defaultdict
 
 from processor.config import config
 from processor.constants import (
     AUDIO_TRACK_IDENTIFIER,
-    EXPECTED_TRACKS_PER_SESSION,
+    MIN_PARTICIPANTS,
 )
 from processor.s3_client import (
     list_audio_tracks,
@@ -17,7 +18,7 @@ from processor.s3_client import (
     processed_exists,
 )
 from processor.converter import webm_to_wav
-from processor.merger import merge_tracks
+from processor.merger import merge_tracks, concat_tracks
 from processor.session_store import get_session, update_status
 
 logger: logging.Logger = logging.getLogger()
@@ -43,18 +44,29 @@ def _build_participant_map(
 ) -> dict[str, dict[str, str]]:
     """Build a connectionId → {role, name} map from session data.
 
-    DynamoDB session contains:
-      participant_connections: {userId: connectionId}
-      participants:            {userId: displayName}
+    Uses connection_history (connectionId → userId) which is append-only
+    and contains ALL connection IDs ever used, including reconnections.
+
+    Falls back to inverting participant_connections for older sessions
+    that don't have connection_history yet.
     """
-    connections: dict = session.get("participant_connections", {})
     names: dict = session.get("participants", {})
+    history: dict = session.get("connection_history", {})
     result: dict[str, dict[str, str]] = {}
 
-    for user_id, conn_id in connections.items():
-        role = "host" if user_id.startswith("host-") else "guest"
-        name = names.get(user_id, role.capitalize())
-        result[conn_id] = {"role": role, "name": name}
+    if history:
+        # Preferred: connection_history has ALL connectionIds
+        for conn_id, user_id in history.items():
+            role = "host" if user_id.startswith("host-") else "guest"
+            name = names.get(user_id, role.capitalize())
+            result[conn_id] = {"role": role, "name": name}
+    else:
+        # Fallback: invert participant_connections (only has latest per user)
+        connections: dict = session.get("participant_connections", {})
+        for user_id, conn_id in connections.items():
+            role = "host" if user_id.startswith("host-") else "guest"
+            name = names.get(user_id, role.capitalize())
+            result[conn_id] = {"role": role, "name": name}
 
     return result
 
@@ -66,28 +78,57 @@ def _sanitize_filename(name: str) -> str:
     return sanitized or "unknown"
 
 
-def _resolve_track_name(
-    s3_key: str,
-    index: int,
+def _group_tracks_by_participant(
+    track_keys: list[str],
     participant_map: dict[str, dict[str, str]],
-) -> str:
-    """Resolve a human-readable upload name for a track."""
-    conn_id = _extract_connection_id(s3_key)
-    if conn_id and conn_id in participant_map:
-        info = participant_map[conn_id]
-        safe_name = _sanitize_filename(info["name"])
-        return f"{info['role']}-{safe_name}"
+) -> dict[str, list[str]]:
+    """Group S3 track keys by participant role-name.
 
-    fallback = "host" if index == 0 else "guest"
-    logger.warning(
-        "Track %d: connectionId %s not in map, using %s",
-        index, conn_id, fallback,
-    )
-    return f"{fallback}-speaker-{index + 1}"
+    Returns e.g.:
+      {"host-ak": ["s3/key1"], "guest-yv": ["s3/key2", "s3/key3"]}
+
+    Track keys within each group are already sorted chronologically
+    (list_audio_tracks returns sorted keys, and the filename contains
+    timestamps that sort correctly).
+    """
+    groups: dict[str, list[str]] = defaultdict(list)
+    unmatched_index = 0
+
+    for s3_key in track_keys:
+        conn_id = _extract_connection_id(s3_key)
+        if conn_id and conn_id in participant_map:
+            info = participant_map[conn_id]
+            safe_name = _sanitize_filename(info["name"])
+            group_key = f"{info['role']}-{safe_name}"
+        else:
+            # Fallback for tracks we can't map
+            fallback = "host" if unmatched_index == 0 else "guest"
+            group_key = f"{fallback}-speaker-{unmatched_index + 1}"
+            unmatched_index += 1
+            logger.warning(
+                "Track connectionId %s not in map, assigned to %s",
+                conn_id, group_key,
+            )
+        groups[group_key].append(s3_key)
+
+    return dict(groups)
+
+
+def _count_distinct_participants(
+    track_keys: list[str],
+    participant_map: dict[str, dict[str, str]],
+) -> int:
+    """Count how many distinct participant roles have tracks."""
+    roles: set[str] = set()
+    for s3_key in track_keys:
+        conn_id = _extract_connection_id(s3_key)
+        if conn_id and conn_id in participant_map:
+            roles.add(participant_map[conn_id]["role"])
+    return len(roles)
 
 
 def handler(event: dict, _context: object) -> dict:
-    """S3 event handler — waits for both tracks, then converts and merges."""
+    """S3 event handler — waits for tracks from all participants, then processes."""
     for record in event.get("Records", []):
         s3_key: str = record["s3"]["object"]["key"]
         logger.info("S3 event: %s", s3_key)
@@ -111,79 +152,85 @@ def handler(event: dict, _context: object) -> dict:
             )
             continue
 
+        # Load session to get connection_history for participant mapping
+        session = get_session(session_id)
+        if not session:
+            logger.warning("Session %s not found in DynamoDB, skipping", session_id)
+            continue
+
+        participant_map = _build_participant_map(session)
+
         room_prefix = f"{domain}/{room_name}/"
         tracks = list_audio_tracks(room_prefix)
 
-        if len(tracks) < EXPECTED_TRACKS_PER_SESSION:
+        # Wait until we have tracks from at least MIN_PARTICIPANTS distinct participants
+        distinct = _count_distinct_participants(tracks, participant_map)
+        if distinct < MIN_PARTICIPANTS:
             logger.info(
-                "Session %s: %d/%d tracks — waiting",
-                session_id, len(tracks), EXPECTED_TRACKS_PER_SESSION,
+                "Session %s: %d tracks from %d/%d participants — waiting",
+                session_id, len(tracks), distinct, MIN_PARTICIPANTS,
             )
             continue
 
         logger.info(
-            "Session %s: all tracks present — processing", session_id,
+            "Session %s: %d tracks from %d participants — processing",
+            session_id, len(tracks), distinct,
         )
-        _process_session(
-            session_id, tracks[:EXPECTED_TRACKS_PER_SESSION],
-        )
+        _process_session(session_id, tracks, participant_map)
 
     return {"status": "ok"}
 
 
-def _download_and_resolve(
-    track_keys: list[str],
+def _process_session(
     session_id: str,
-) -> tuple[list[str], list[str]]:
-    """Download tracks from S3 and resolve participant-based file names."""
-    session = get_session(session_id)
-    participant_map = _build_participant_map(session) if session else {}
-    if participant_map:
-        logger.info(
-            "Session %s: participant map — %s",
-            session_id, participant_map,
-        )
-    else:
-        logger.warning(
-            "Session %s: no participant map, using fallback names",
-            session_id,
-        )
-
-    local_paths: list[str] = []
-    names: list[str] = []
-    for i, s3_key in enumerate(track_keys):
-        local_path = f"/tmp/track_{i}.webm"
-        download_track(s3_key, local_path)
-        local_paths.append(local_path)
-        names.append(_resolve_track_name(s3_key, i, participant_map))
-
-    return local_paths, names
-
-
-def _process_session(session_id: str, track_keys: list[str]) -> None:
-    """Download tracks, convert to WAV, merge, upload with proper names."""
-    local_tracks: list[str] = []
-    wav_files: list[str] = []
+    track_keys: list[str],
+    participant_map: dict[str, dict[str, str]],
+) -> None:
+    """Download all tracks, group by participant, concat segments, merge, upload."""
+    temp_files: list[str] = []
 
     try:
-        local_tracks, upload_names = _download_and_resolve(
-            track_keys, session_id,
+        # Group tracks by participant
+        groups = _group_tracks_by_participant(track_keys, participant_map)
+        logger.info(
+            "Session %s: track groups — %s",
+            session_id,
+            {k: len(v) for k, v in groups.items()},
         )
 
-        # Convert each to mono WAV
-        for i, track_path in enumerate(local_tracks):
-            wav_path = f"/tmp/{upload_names[i]}.wav"
-            webm_to_wav(track_path, wav_path)
-            wav_files.append(wav_path)
+        consolidated_wavs: list[str] = []
+        consolidated_names: list[str] = []
 
-        # Merge into combined
+        for group_name, group_keys in sorted(groups.items()):
+            # Download all segments for this participant
+            segment_wavs: list[str] = []
+            for i, s3_key in enumerate(group_keys):
+                local_webm = f"/tmp/{group_name}_seg{i}.webm"
+                download_track(s3_key, local_webm)
+                temp_files.append(local_webm)
+
+                # Convert each segment to WAV
+                local_wav = f"/tmp/{group_name}_seg{i}.wav"
+                webm_to_wav(local_webm, local_wav)
+                segment_wavs.append(local_wav)
+                temp_files.append(local_wav)
+
+            # Concatenate segments into one file per participant
+            concat_path = f"/tmp/{group_name}.wav"
+            concat_tracks(segment_wavs, concat_path)
+            temp_files.append(concat_path)
+
+            consolidated_wavs.append(concat_path)
+            consolidated_names.append(group_name)
+
+        # Merge all participants into combined
         combined_path = "/tmp/combined.wav"
-        merge_tracks(wav_files, combined_path)
-        wav_files.append(combined_path)
+        merge_tracks(consolidated_wavs, combined_path)
+        temp_files.append(combined_path)
 
-        # Upload into processed/session-{sessionId}/
+        # Upload: individual participant files + combined
         output_prefix = f"{config.PROCESSED_PREFIX}session-{session_id}"
-        for wav_path in wav_files:
+        for wav_path in [*consolidated_wavs, combined_path]:
             filename = os.path.basename(wav_path)
             upload_file(wav_path, f"{output_prefix}/{filename}")
 
@@ -203,7 +250,7 @@ def _process_session(session_id: str, track_keys: list[str]) -> None:
         raise
 
     finally:
-        for path in [*local_tracks, *wav_files]:
+        for path in temp_files:
             try:
                 os.remove(path)
             except OSError:

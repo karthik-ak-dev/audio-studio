@@ -531,6 +531,7 @@ def _to_session_response(session: Session) -> SessionResponse:
         participant_count=session.participant_count,
         active_participants=sorted(session.active_participants),
         participants=session.participants,
+        connection_history=session.connection_history,
         recording_started_at=session.recording_started_at,
         recording_stopped_at=session.recording_stopped_at,
         pause_events=session.pause_events,
