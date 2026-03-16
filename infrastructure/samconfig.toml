@@ -37,7 +37,7 @@ confirm_changeset = true
 
 parameter_overrides = [
   "Environment=stage",
-  "DailyDomain=ak-kgen",
+  "DailyDomain=stage-kgen",
 ]
 
 # FrontendOrigin left empty — auto-uses CloudFront URL

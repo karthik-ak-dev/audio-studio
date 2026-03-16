@@ -48,11 +48,16 @@ ffmpeg: ## Download static ffmpeg binary for Lambda (one-time)
 #   make deploy-stage DAILY_API_KEY=xxx    (DAILY_API_KEY = Daily.co API key)
 #   make deploy-stage-fe         (build + push frontend to S3 + invalidate CF)
 
-deploy-stage: ## Deploy backend to stage (DAILY_API_KEY=DailyApiKey)
+deploy-stage: ## Deploy backend to stage (DAILY_API_KEY=xxx [DAILY_WEBHOOK_SECRET=xxx])
 	@test -f audio-merger/bin/ffmpeg || (echo "Error: run 'make ffmpeg' first" && exit 1)
 	@test -n "$(DAILY_API_KEY)" || (echo "Error: DAILY_API_KEY required — make deploy-stage DAILY_API_KEY=your-daily-api-key" && exit 1)
 	$(INFRA) sam build --config-env stage --use-container
-	$(INFRA) sam deploy --config-env stage --parameter-overrides \
+	# Note: --parameter-overrides replaces samconfig.toml values entirely,
+	# so Environment and DailyDomain must be repeated here.
+	# DAILY_WEBHOOK_SECRET defaults to "none" which skips HMAC verification.
+	$(INFRA) sam deploy --config-env stage --force-upload --parameter-overrides \
+		"Environment=stage" \
+		"DailyDomain=stage-kgen" \
 		"DailyApiKey=$(DAILY_API_KEY)" \
 		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)"
 
@@ -74,11 +79,16 @@ deploy-stage-fe: ## Deploy frontend to stage
 # Prod Deployment
 # ──────────────────────────────────────────────
 
-deploy-prod: ## Deploy backend to prod (DAILY_API_KEY=DailyApiKey)
+deploy-prod: ## Deploy backend to prod (DAILY_API_KEY=xxx [DAILY_WEBHOOK_SECRET=xxx])
 	@test -f audio-merger/bin/ffmpeg || (echo "Error: run 'make ffmpeg' first" && exit 1)
 	@test -n "$(DAILY_API_KEY)" || (echo "Error: DAILY_API_KEY required — make deploy-prod DAILY_API_KEY=your-daily-api-key" && exit 1)
 	$(INFRA) sam build --config-env prod --use-container
-	$(INFRA) sam deploy --config-env prod --parameter-overrides \
+	# Note: --parameter-overrides replaces samconfig.toml values entirely,
+	# so Environment and DailyDomain must be repeated here.
+	# DAILY_WEBHOOK_SECRET defaults to "none" which skips HMAC verification.
+	$(INFRA) sam deploy --config-env prod --force-upload --parameter-overrides \
+		"Environment=prod" \
+		"DailyDomain=ak-kgen" \
 		"DailyApiKey=$(DAILY_API_KEY)" \
 		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)"
 
@@ -107,6 +117,6 @@ clean: ## Stop and remove all Docker containers + volumes
 # One-time
 # make ffmpeg
 # Deploy backend (replace placeholders with your actual values)
-# make deploy-stage DAILY_API_KEY=62e43afcba46bb216b37dc6b97c98dff0936e2483090a4b67f743b593faf1628 DAILY_WEBHOOK_SECRET=your-secret-here
+# make deploy-stage DAILY_API_KEY=<your-daily-api-key> DAILY_WEBHOOK_SECRET=<your-webhook-secret>
 # Deploy frontend
 # make deploy-stage-fe

@@ -351,9 +351,9 @@ Outputs:
   # cd infrastructure && sam build --config-env stage --use-container
 
   # sam deploy --config-env stage --parameter-overrides \
-  #   DailyApiKey=62e43afcba46bb216b37dc6b97c98dff0936e2483090a4b67f743b593faf1628 \
-  #   DailyWebhookSecret=YOUR_DAILY_WEBHOOK_SECRET \
-  #   DailyDomain=ak-kgen \
+  #   DailyApiKey=<DAILY_API_KEY> \
+  #   DailyWebhookSecret=<DAILY_WEBHOOK_SECRET> \
+  #   DailyDomain=stage-kgen \
   #   Environment=stage
 
   # Get Output values
@@ -362,13 +362,3 @@ Outputs:
   #   --region ap-south-1 \
   #   --query "Stacks[0].Outputs" \
   #   --output table
-
-  # Build FE
-  # cd web
-  # VITE_API_BASE_URL=https://3w9acjijq0.execute-api.ap-south-1.amazonaws.com npm run build
-
-  # Push build to S3
-  # aws s3 sync dist/ s3://audio-studio-web-stage-035475678676/ --delete
-
-  # Invalidate CF Cached 
-  # aws cloudfront create-invalidation --distribution-id E29OTQQV4EV495 --paths "/*"
