@@ -33,6 +33,7 @@ from app.types.responses import (
 from app.services.session_service import (
     SessionNotFoundError,
     InvalidSessionStateError,
+    DuplicateJoinError,
 )
 from app.services import session_service
 
@@ -72,6 +73,9 @@ async def join_session(session_id: str, req: JoinRequest) -> SessionActionRespon
         return await session_service.join_session(session_id, req)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
+    except DuplicateJoinError as exc:
+        logger.warning("Duplicate join rejected: session=%s — %s", session_id, exc)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{session_id}/leave", response_model=SessionActionResponse)

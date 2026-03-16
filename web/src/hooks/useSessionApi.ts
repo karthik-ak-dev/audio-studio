@@ -13,7 +13,7 @@ interface UseSessionApiReturn {
   getSession: (sessionId: string) => Promise<Session | null>;
   /** Silent poll — no loading flag, no error state. Returns null on failure. */
   pollSession: (sessionId: string) => Promise<Session | null>;
-  joinSession: (sessionId: string, body: JoinSessionBody) => Promise<boolean>;
+  joinSession: (sessionId: string, body: JoinSessionBody) => Promise<boolean | "duplicate">;
   leaveSession: (sessionId: string, body: LeaveSessionBody) => Promise<boolean>;
   startRecording: (sessionId: string) => Promise<ActionResult>;
   endSession: (sessionId: string) => Promise<ActionResult>;
@@ -85,13 +85,17 @@ export function useSessionApi(): UseSessionApiReturn {
     [],
   );
 
-  // Blocking join with retry-once-after-2s
+  // Blocking join with retry-once-after-2s (no retry on 409 duplicate)
   const joinSession = useCallback(
-    async (sessionId: string, body: JoinSessionBody): Promise<boolean> => {
+    async (sessionId: string, body: JoinSessionBody): Promise<boolean | "duplicate"> => {
       try {
         await api.joinSession(sessionId, body);
         return true;
       } catch (err) {
+        // 409 = duplicate join — don't retry, surface immediately
+        if (err instanceof ApiError && err.status === 409) {
+          return "duplicate";
+        }
         console.warn("Join attempt 1 failed, retrying in 2s:", err);
         // Retry once after delay
         await new Promise((r) => setTimeout(r, JOIN_RETRY_DELAY_MS));
@@ -99,6 +103,9 @@ export function useSessionApi(): UseSessionApiReturn {
           await api.joinSession(sessionId, body);
           return true;
         } catch (retryErr) {
+          if (retryErr instanceof ApiError && retryErr.status === 409) {
+            return "duplicate";
+          }
           console.warn("Join attempt 2 failed:", retryErr);
           return false;
         }

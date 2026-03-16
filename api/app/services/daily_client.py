@@ -101,6 +101,31 @@ class DailyClient:
             )
             return token
 
+    async def get_room_presence(self, room_name: str) -> list[dict[str, object]]:
+        """Get current participants in a room via Daily REST API.
+
+        Returns a list of participant dicts, each with:
+          id: connection-level UUID (same as session_id in client SDK)
+          userId: the user_id from the meeting token
+          userName, joinTime, duration
+        """
+        async with httpx.AsyncClient() as client:
+            response: httpx.Response = await client.get(
+                f"{self.base_url}/rooms/{room_name}/presence",
+                headers=self.headers,
+                timeout=5.0,
+            )
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            data: dict[str, object] = response.json()
+            participants: list[dict[str, object]] = data.get("data", [])  # type: ignore[assignment]
+            logger.info(
+                "Daily API: room presence room=%s count=%d",
+                room_name, len(participants),
+            )
+            return participants
+
     async def start_recording(self, room_name: str) -> dict[str, object]:
         """Start raw-tracks audio-only recording."""
         logger.info("Daily API: starting recording room=%s", room_name)

@@ -133,6 +133,28 @@ async def join_session(session_id: str, req: JoinRequest) -> SessionActionRespon
     if existing is None:
         raise SessionNotFoundError(session_id)
 
+    # Duplicate join prevention — one active connection per user_id
+    stored_conn: str | None = existing.participant_connections.get(req.user_id)
+    if (
+        req.user_id in existing.active_participants
+        and stored_conn is not None
+        and stored_conn != req.connection_id
+    ):
+        # Could be a genuine duplicate OR a refresh where the webhook hasn't arrived yet.
+        # Ask Daily if the old connection is actually still in the room.
+        presence = await daily_client.get_room_presence(existing.daily_room_name)
+        if any(p.get("id") == stored_conn for p in presence):
+            logger.warning(
+                "Duplicate join blocked: session=%s user=%s existing_conn=%s new_conn=%s",
+                session_id, req.user_id, stored_conn, req.connection_id,
+            )
+            raise DuplicateJoinError(session_id, req.user_id)
+        # Old connection gone — stale entry, webhook delayed. Allow rejoin.
+        logger.info(
+            "Join: stale connection detected, allowing rejoin: session=%s user=%s old_conn=%s new_conn=%s",
+            session_id, req.user_id, stored_conn, req.connection_id,
+        )
+
     # Atomic add — returns full updated session with new set size
     session: Session = session_repo.add_participant(
         session_id=session_id,
@@ -621,3 +643,14 @@ class InvalidSessionStateError(Exception):
         self.current_status: SessionStatus = current_status
         self.action: str = action
         super().__init__(f"Cannot {action} session '{session_id}' in '{current_status}' status")
+
+
+class DuplicateJoinError(Exception):
+    """Raised when a user_id is already connected with a different connection."""
+
+    def __init__(self, session_id: str, user_id: str) -> None:
+        self.session_id: str = session_id
+        self.user_id: str = user_id
+        super().__init__(
+            f"User '{user_id}' is already connected to session '{session_id}'"
+        )
