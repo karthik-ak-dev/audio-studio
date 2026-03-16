@@ -40,6 +40,11 @@ class SessionResponse(BaseModel):
     s3_key: Optional[str] = None
     s3_processed_prefix: Optional[str] = None
 
+    # Processed audio file URLs
+    host_audio_url: Optional[str] = None
+    guest_audio_url: Optional[str] = None
+    combined_audio_url: Optional[str] = None
+
     error_message: Optional[str] = None
     created_at: str
     updated_at: str

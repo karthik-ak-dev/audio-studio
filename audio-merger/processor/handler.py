@@ -19,6 +19,7 @@ from processor.s3_client import (
     download_track,
     upload_file,
     processed_exists,
+    track_timestamp,
 )
 from processor.merger import merge_tracks, concat_and_convert
 from processor.session_store import get_session, update_status
@@ -96,9 +97,8 @@ def _group_tracks_by_participant(
     Returns e.g.:
       {"host-ak": ["s3/key1"], "guest-yv": ["s3/key2", "s3/key3"]}
 
-    Track keys within each group are already sorted chronologically
-    (list_audio_tracks returns sorted keys, and the filename contains
-    timestamps that sort correctly).
+    Each group is sorted by trackTimestamp (the actual audio start time)
+    to ensure correct chronological concatenation order.
     """
     groups: dict[str, list[str]] = defaultdict(list)
     unmatched_index = 0
@@ -119,6 +119,10 @@ def _group_tracks_by_participant(
                 session_id, conn_id, group_key, s3_key,
             )
         groups[group_key].append(s3_key)
+
+    # Sort each participant's tracks by trackTimestamp (audio start time)
+    for group_key in groups:
+        groups[group_key].sort(key=track_timestamp)
 
     return dict(groups)
 
@@ -148,12 +152,18 @@ def _process_session(  # pylint: disable=too-many-locals
         )
 
         participant_wavs: list[str] = []
+        # Track the earliest trackTimestamp per participant for time alignment
+        participant_start_ts: list[int] = []
 
         for group_name, group_keys in sorted(groups.items()):
             logger.info(
                 "session=%s Processing participant: %s (%d segments)",
                 session_id, group_name, len(group_keys),
             )
+
+            # Record earliest trackTimestamp for this participant
+            earliest_ts = track_timestamp(group_keys[0])
+            participant_start_ts.append(earliest_ts)
 
             # Download all raw segments for this participant
             local_segments: list[str] = []
@@ -174,13 +184,21 @@ def _process_session(  # pylint: disable=too-many-locals
             participant_wavs.append(output_wav)
             temp_files.append(output_wav)
 
-        # Merge all participants into combined
+        # Calculate delay offsets (ms) relative to the earliest participant
+        global_start = min(participant_start_ts) if participant_start_ts else 0
+        delay_ms = [ts - global_start for ts in participant_start_ts]
+        logger.info(
+            "session=%s Time alignment — start_ts=%s global_start=%d delays_ms=%s",
+            session_id, participant_start_ts, global_start, delay_ms,
+        )
+
+        # Merge all participants into combined (with time alignment)
         combined_path = "/tmp/combined.wav"
         logger.info(
             "session=%s Merging %d participant WAVs into combined.wav",
             session_id, len(participant_wavs),
         )
-        merge_tracks(session_id, participant_wavs, combined_path)
+        merge_tracks(session_id, participant_wavs, combined_path, delay_ms=delay_ms)
         temp_files.append(combined_path)
 
         # Upload: individual participant files + combined
@@ -194,13 +212,32 @@ def _process_session(  # pylint: disable=too-many-locals
             upload_file(session_id, wav_path,
                         f"{output_prefix}/{os.path.basename(wav_path)}")
 
-        # Update session status
+        # Build individual audio URLs for each participant
+        bucket_uri = f"s3://{config.RECORDINGS_BUCKET}/{output_prefix}"
+        host_audio_url: str = ""
+        guest_audio_url: str = ""
+        for wav_path in participant_wavs:
+            filename = os.path.basename(wav_path)
+            url = f"{bucket_uri}/{filename}"
+            if filename.startswith("host-"):
+                host_audio_url = url
+            elif filename.startswith("guest-"):
+                guest_audio_url = url
+        combined_audio_url = f"{bucket_uri}/combined.wav"
+
+        logger.info(
+            "session=%s Audio URLs — host=%s guest=%s combined=%s",
+            session_id, host_audio_url, guest_audio_url, combined_audio_url,
+        )
+
+        # Update session status with all three audio URLs
         update_status(
             session_id,
             "completed",
-            s3_processed_prefix=(
-                f"s3://{config.RECORDINGS_BUCKET}/{output_prefix}/"
-            ),
+            s3_processed_prefix=f"{bucket_uri}/",
+            host_audio_url=host_audio_url,
+            guest_audio_url=guest_audio_url,
+            combined_audio_url=combined_audio_url,
         )
         logger.info("session=%s Processing complete", session_id)
 

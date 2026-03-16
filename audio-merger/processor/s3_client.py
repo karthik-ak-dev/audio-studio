@@ -1,5 +1,6 @@
 """S3 operations for downloading raw tracks and uploading processed WAVs."""
 
+import re
 import logging
 
 import boto3
@@ -10,9 +11,23 @@ from processor.constants import AUDIO_TRACK_IDENTIFIER
 logger: logging.Logger = logging.getLogger(__name__)
 s3 = boto3.client("s3")
 
+# Extract the trackTimestamp from the end of an S3 key:
+#   {domain}/session-{id}/{recordingTs}-{connId}-cam-audio-{trackTs}
+_TRACK_TS_RE: re.Pattern[str] = re.compile(r"cam-audio-(\d+)$")
+
+
+def track_timestamp(s3_key: str) -> int:
+    """Extract trackTimestamp (ms since epoch) from S3 key for sorting."""
+    match = _TRACK_TS_RE.search(s3_key)
+    return int(match.group(1)) if match else 0
+
 
 def list_audio_tracks(session_id: str, room_prefix: str) -> list[str]:
-    """List all audio track files for a recording session."""
+    """List all audio track files for a recording session.
+
+    Returns keys sorted by trackTimestamp (the actual audio start time),
+    NOT by the full key string which would sort by recordingTimestamp.
+    """
     logger.info(
         "session=%s S3: listing tracks bucket=%s prefix=%s",
         session_id, config.RECORDINGS_BUCKET, room_prefix,
@@ -24,11 +39,12 @@ def list_audio_tracks(session_id: str, room_prefix: str) -> list[str]:
     contents = response.get("Contents", [])
     all_keys = [obj["Key"] for obj in contents]
     tracks = [key for key in all_keys if AUDIO_TRACK_IDENTIFIER in key]
+    tracks.sort(key=track_timestamp)
     logger.info(
         "session=%s S3: found %d objects, %d audio tracks under %s",
         session_id, len(all_keys), len(tracks), room_prefix,
     )
-    return sorted(tracks)
+    return tracks
 
 
 def download_track(session_id: str, s3_key: str, local_path: str) -> None:

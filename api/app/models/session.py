@@ -49,6 +49,9 @@ class Session:  # pylint: disable=too-many-instance-attributes
 
     # Post-processing
     s3_processed_prefix: Optional[str] = None
+    host_audio_url: Optional[str] = None
+    guest_audio_url: Optional[str] = None
+    combined_audio_url: Optional[str] = None
     error_message: Optional[str] = None
 
     # Timestamps
@@ -98,6 +101,12 @@ class Session:  # pylint: disable=too-many-instance-attributes
             item["s3_key"] = self.s3_key
         if self.s3_processed_prefix is not None:
             item["s3_processed_prefix"] = self.s3_processed_prefix
+        if self.host_audio_url is not None:
+            item["host_audio_url"] = self.host_audio_url
+        if self.guest_audio_url is not None:
+            item["guest_audio_url"] = self.guest_audio_url
+        if self.combined_audio_url is not None:
+            item["combined_audio_url"] = self.combined_audio_url
         if self.error_message is not None:
             item["error_message"] = self.error_message
         return item
@@ -146,6 +155,9 @@ class Session:  # pylint: disable=too-many-instance-attributes
             recording_stopped_at=_opt_str(item, "recording_stopped_at"),
             s3_key=_opt_str(item, "s3_key"),
             s3_processed_prefix=_opt_str(item, "s3_processed_prefix"),
+            host_audio_url=_opt_str(item, "host_audio_url"),
+            guest_audio_url=_opt_str(item, "guest_audio_url"),
+            combined_audio_url=_opt_str(item, "combined_audio_url"),
             error_message=_opt_str(item, "error_message"),
             created_at=str(item.get("created_at", "")),
             updated_at=str(item.get("updated_at", "")),

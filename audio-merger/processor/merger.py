@@ -73,9 +73,18 @@ def concat_and_convert(
 
 
 def merge_tracks(
-    session_id: str, wav_paths: list[str], output_path: str,
+    session_id: str,
+    wav_paths: list[str],
+    output_path: str,
+    delay_ms: list[int] | None = None,
 ) -> None:
-    """Merge multiple mono WAV files into a single mono mix."""
+    """Merge multiple mono WAV files into a single mono mix.
+
+    Supports N participants (not just 2). When delay_ms is provided, each
+    participant's audio is delayed by the corresponding number of milliseconds
+    to maintain correct time alignment (e.g., a guest who joined 500ms after
+    the host gets 500ms of silence prepended).
+    """
     duration: str = config.MERGE_DURATION
     if duration not in VALID_MERGE_DURATIONS:
         logger.warning(
@@ -84,12 +93,13 @@ def merge_tracks(
         )
         duration = DEFAULT_MERGE_DURATION
 
+    n = len(wav_paths)
     logger.info(
-        "session=%s ffmpeg: merging %d tracks → %s (duration=%s)",
-        session_id, len(wav_paths), output_path, duration,
+        "session=%s ffmpeg: merging %d tracks → %s (duration=%s, delays=%s)",
+        session_id, n, output_path, duration, delay_ms,
     )
 
-    if len(wav_paths) < 2:
+    if n < 2:
         cmd: list[str] = [
             FFMPEG_PATH, "-y",
             "-i", wav_paths[0],
@@ -97,16 +107,42 @@ def merge_tracks(
             output_path,
         ]
     else:
-        filter_expr = (
-            f"amix=inputs=2:duration={duration}:normalize=0,"
-            f"aformat=sample_fmts=s16"
-            f":sample_rates={SAMPLE_RATE}"
-            f":channel_layouts=mono"
-        )
+        # Build input args for all participants
+        inputs: list[str] = []
+        for path in wav_paths:
+            inputs.extend(["-i", path])
+
+        # Build filter: optionally delay each input, then amix all
+        if delay_ms and any(d > 0 for d in delay_ms):
+            # Apply adelay to each input that has a non-zero offset
+            delay_parts: list[str] = []
+            amix_inputs: list[str] = []
+            for i, d in enumerate(delay_ms):
+                if d > 0:
+                    delay_parts.append(f"[{i}]adelay={d}|{d}[d{i}]")
+                    amix_inputs.append(f"[d{i}]")
+                else:
+                    amix_inputs.append(f"[{i}]")
+            filter_expr = ";".join(delay_parts) + ";" if delay_parts else ""
+            filter_expr += (
+                "".join(amix_inputs)
+                + f"amix=inputs={n}:duration={duration}:normalize=0,"
+                f"aformat=sample_fmts=s16"
+                f":sample_rates={SAMPLE_RATE}"
+                f":channel_layouts=mono"
+            )
+        else:
+            # No alignment needed — straightforward amix
+            filter_expr = (
+                f"amix=inputs={n}:duration={duration}:normalize=0,"
+                f"aformat=sample_fmts=s16"
+                f":sample_rates={SAMPLE_RATE}"
+                f":channel_layouts=mono"
+            )
+
         cmd = [
             FFMPEG_PATH, "-y",
-            "-i", wav_paths[0],
-            "-i", wav_paths[1],
+            *inputs,
             "-filter_complex", filter_expr,
             output_path,
         ]
