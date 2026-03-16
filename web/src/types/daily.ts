@@ -16,6 +16,10 @@ export type DailySdkEvent =
   | "recording-started"
   | "recording-stopped";
 
+// ── App-message types (peer-to-peer via Daily sendAppMessage) ──
+export type AppMessage =
+  | { type: "mute-state"; muted: boolean };
+
 export interface DailyCallState {
   isJoined: boolean;
   isMuted: boolean;

@@ -5,7 +5,7 @@ import DailyIframe, {
   type DailyEventObjectParticipantLeft,
   type DailyEventObjectNetworkQualityEvent,
 } from "@daily-co/daily-js";
-import type { DailyCallState, DailyParticipant, DailySdkEvent, NetworkQuality } from "@/types/daily";
+import type { AppMessage, DailyCallState, DailyParticipant, DailySdkEvent, NetworkQuality } from "@/types/daily";
 
 interface UseDailyOptions {
   roomUrl: string;
@@ -43,6 +43,8 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>(0);
   const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+  /** Remote mute state from app-message (track.enabled doesn't update SDK's participant.audio for peers) */
+  const remoteMuteRef = useRef<Map<string, boolean>>(new Map());
 
   /** Attach or detach <audio> elements for remote participants' audio tracks. */
   const syncRemoteAudio = useCallback((call: DailyCall) => {
@@ -99,6 +101,13 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
     const mapped: DailyParticipant[] = Object.values(allParticipants).map(
       (p) => mapParticipant(p as unknown as Record<string, unknown>),
     );
+
+    // Patch remote audio state from app-message overrides
+    for (const m of mapped) {
+      if (!m.local && remoteMuteRef.current.has(m.session_id)) {
+        m.audio = !remoteMuteRef.current.get(m.session_id)!;
+      }
+    }
 
     // Extract local user's connection_id and user_id
     const local = allParticipants.local;
@@ -184,6 +193,9 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
       call.on(
         "participant-left",
         (_event?: DailyEventObjectParticipantLeft) => {
+          if (_event?.participant?.session_id) {
+            remoteMuteRef.current.delete(String(_event.participant.session_id));
+          }
           updateParticipants(call);
           syncRemoteAudio(call);
           onSdkEvent?.("participant-left");
@@ -193,6 +205,18 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
       call.on("participant-updated", () => {
         updateParticipants(call);
         syncRemoteAudio(call);
+      });
+
+      // App-message — peer-to-peer state sync (mute, future: chat)
+      call.on("app-message", (event?: { data: AppMessage; fromId: string }) => {
+        if (!event) return;
+        const { data, fromId } = event;
+        switch (data.type) {
+          case "mute-state":
+            remoteMuteRef.current.set(fromId, data.muted);
+            updateParticipants(call);
+            break;
+        }
       });
 
       call.on(
@@ -262,7 +286,11 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
     const track = callRef.current.participants().local?.tracks?.audio?.persistentTrack;
     if (!track) return;
     track.enabled = !track.enabled;
-    setState((prev) => ({ ...prev, isMuted: !track.enabled }));
+    const muted = !track.enabled;
+    setState((prev) => ({ ...prev, isMuted: muted }));
+    // Broadcast mute state to remote peers (track.enabled doesn't update
+    // Daily's participant.audio for others)
+    callRef.current.sendAppMessage({ type: "mute-state", muted }, "*");
   }, []);
 
   /** Programmatic mute/unmute — used for auto-mute on pause */
@@ -272,6 +300,7 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
     if (!track) return;
     track.enabled = !muted;
     setState((prev) => ({ ...prev, isMuted: muted }));
+    callRef.current.sendAppMessage({ type: "mute-state", muted }, "*");
   }, []);
 
   // Cleanup on unmount
