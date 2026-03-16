@@ -137,6 +137,9 @@ def _process_session(  # pylint: disable=too-many-locals
     Pipeline per participant (single ffmpeg pass):
       WebM segments → [decode + concat + convert] → one WAV per participant
 
+    When a participant has multiple segments (e.g. disconnect/reconnect),
+    gaps between segments are filled with silence to preserve time alignment.
+
     Then merge participant WAVs into combined.wav.
     """
     temp_files: list[str] = []
@@ -178,11 +181,20 @@ def _process_session(  # pylint: disable=too-many-locals
                 session_id, len(local_segments), group_name,
             )
 
+            # Get trackTimestamps for each segment (for gap-aware concatenation)
+            segment_timestamps = [track_timestamp(key) for key in group_keys]
+
             # Single ffmpeg pass: decode + concat + convert → one WAV
+            # When multiple segments exist, silence is inserted for gaps
+            # (e.g. participant disconnected and reconnected)
             output_wav = f"/tmp/{group_name}.wav"
-            concat_and_convert(session_id, local_segments, output_wav)
+            silence_temps = concat_and_convert(
+                session_id, local_segments, output_wav,
+                track_timestamps_ms=segment_timestamps,
+            )
             participant_wavs.append(output_wav)
             temp_files.append(output_wav)
+            temp_files.extend(silence_temps)
 
         # Calculate delay offsets (ms) relative to the earliest participant
         global_start = min(participant_start_ts) if participant_start_ts else 0

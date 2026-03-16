@@ -255,15 +255,22 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
 
   const toggleMute = useCallback(() => {
     if (!callRef.current) return;
-    const localAudio = callRef.current.localAudio();
-    callRef.current.setLocalAudio(!localAudio);
-    setState((prev) => ({ ...prev, isMuted: localAudio }));
+    // Use track.enabled instead of setLocalAudio() so that Daily's SFU
+    // keeps receiving silent frames during mute. This ensures raw-tracks
+    // recording captures silence (preserving timeline) rather than
+    // stripping the muted period and causing merge drift.
+    const track = callRef.current.participants().local?.tracks?.audio?.persistentTrack;
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setState((prev) => ({ ...prev, isMuted: !track.enabled }));
   }, []);
 
   /** Programmatic mute/unmute — used for auto-mute on pause */
   const setMuted = useCallback((muted: boolean) => {
     if (!callRef.current) return;
-    callRef.current.setLocalAudio(!muted);
+    const track = callRef.current.participants().local?.tracks?.audio?.persistentTrack;
+    if (!track) return;
+    track.enabled = !muted;
     setState((prev) => ({ ...prev, isMuted: muted }));
   }, []);
 

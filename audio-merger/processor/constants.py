@@ -8,8 +8,9 @@ BIT_DEPTH: int = 16
 CHANNELS: int = 1  # Mono
 CODEC: str = "pcm_s16le"
 
-# ffmpeg binary — /var/task/bin/ffmpeg on Lambda (bundled), /usr/bin/ffmpeg locally
+# ffmpeg/ffprobe binaries — /var/task/bin/ on Lambda (bundled), /usr/bin/ locally
 FFMPEG_PATH: str = os.environ.get("FFMPEG_PATH", "/var/task/bin/ffmpeg")
+FFPROBE_PATH: str = os.environ.get("FFPROBE_PATH", "/var/task/bin/ffprobe")
 
 # Processing
 FFMPEG_TIMEOUT_SEC: int = 600

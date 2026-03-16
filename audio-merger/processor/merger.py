@@ -11,32 +11,94 @@ from processor.constants import (
     VALID_MERGE_DURATIONS,
     DEFAULT_MERGE_DURATION,
 )
-from processor.ffmpeg import run_ffmpeg
+from processor.ffmpeg import run_ffmpeg, probe_duration_ms
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+def _generate_silence(output_path: str, duration_ms: int, session_id: str) -> None:
+    """Generate a silent WAV file of the given duration."""
+    duration_sec = duration_ms / 1000.0
+    cmd: list[str] = [
+        FFMPEG_PATH, "-y",
+        "-f", "lavfi",
+        "-i", f"anullsrc=r={SAMPLE_RATE}:cl=mono",
+        "-t", f"{duration_sec:.3f}",
+        "-acodec", CODEC,
+        "-ar", str(SAMPLE_RATE),
+        "-ac", str(CHANNELS),
+        output_path,
+    ]
+    run_ffmpeg(cmd, f"session={session_id} ffmpeg generate-silence ({duration_ms}ms)")
+    logger.info(
+        "session=%s Generated %dms silence → %s",
+        session_id, duration_ms, output_path,
+    )
+
+
 def concat_and_convert(
-    session_id: str, input_paths: list[str], output_path: str,
-) -> None:
+    session_id: str,
+    input_paths: list[str],
+    output_path: str,
+    track_timestamps_ms: list[int] | None = None,
+) -> list[str]:
     """Decode, concatenate, and convert multiple audio segments into one WAV.
 
     Accepts any ffmpeg-supported input format (WebM/Opus, WAV, etc.).
-    Single ffmpeg pass — no intermediate files needed.
 
-    Used when a participant disconnects and reconnects — each connection produces
-    a separate track file. This decodes and stitches them together chronologically.
+    When track_timestamps_ms is provided (one per input_path), gaps between
+    consecutive segments are detected using ffprobe durations and filled with
+    silence so that the final WAV preserves real-time alignment.
+
+    Returns a list of any temporary silence files created (caller must clean up).
     """
+    silence_temps: list[str] = []
+
+    # ── Build the effective input list, inserting silence for gaps ──
+    effective_inputs: list[str] = list(input_paths)
+
+    if track_timestamps_ms and len(input_paths) > 1:
+        effective_inputs = []
+        for i, path in enumerate(input_paths):
+            if i > 0:
+                prev_start = track_timestamps_ms[i - 1]
+                prev_duration = probe_duration_ms(input_paths[i - 1])
+                curr_start = track_timestamps_ms[i]
+
+                if prev_duration > 0:
+                    gap_ms = curr_start - (prev_start + prev_duration)
+                else:
+                    # Cannot determine gap without duration — skip silence
+                    gap_ms = 0
+
+                if gap_ms > 100:  # Only insert silence for gaps > 100ms
+                    silence_path = f"{output_path}.silence_{i}.wav"
+                    _generate_silence(silence_path, gap_ms, session_id)
+                    effective_inputs.append(silence_path)
+                    silence_temps.append(silence_path)
+                    logger.info(
+                        "session=%s Inserting %dms silence between segment %d and %d",
+                        session_id, gap_ms, i - 1, i,
+                    )
+                elif gap_ms < -100:
+                    logger.warning(
+                        "session=%s Negative gap %dms between segment %d and %d (overlap?)",
+                        session_id, gap_ms, i - 1, i,
+                    )
+
+            effective_inputs.append(path)
+
+    n_inputs = len(effective_inputs)
     logger.info(
-        "session=%s ffmpeg: concat+convert %d segment(s) → %s",
-        session_id, len(input_paths), output_path,
+        "session=%s ffmpeg: concat+convert %d segment(s) (%d effective inputs) → %s",
+        session_id, len(input_paths), n_inputs, output_path,
     )
 
     inputs: list[str] = []
-    for path in input_paths:
+    for path in effective_inputs:
         inputs.extend(["-i", path])
 
-    if len(input_paths) == 1:
+    if n_inputs == 1:
         # Single segment — just convert (no concat filter needed)
         cmd: list[str] = [
             FFMPEG_PATH, "-y",
@@ -50,7 +112,7 @@ def concat_and_convert(
     else:
         # Multiple segments — concat + convert in one pass
         filter_expr = (
-            f"concat=n={len(input_paths)}:v=0:a=1,"
+            f"concat=n={n_inputs}:v=0:a=1,"
             f"aformat=sample_fmts=s16"
             f":sample_rates={SAMPLE_RATE}"
             f":channel_layouts=mono"
@@ -70,6 +132,7 @@ def concat_and_convert(
         "session=%s ffmpeg: concat+convert done → %s",
         session_id, output_path,
     )
+    return silence_temps
 
 
 def merge_tracks(
