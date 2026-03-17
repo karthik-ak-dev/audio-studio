@@ -24,6 +24,8 @@ export function JoinSession() {
   const [roomUrl, setRoomUrl] = useState<string>("");
 
   const token = searchParams.get("t");
+  const role = searchParams.get("role");
+  const isHostRejoin = role === "host";
 
   useEffect(() => {
     if (!sessionId) return;
@@ -54,7 +56,7 @@ export function JoinSession() {
       `${STORAGE_PREFIX}${sessionId}`,
       JSON.stringify({
         token,
-        isHost: false,
+        isHost: isHostRejoin,
         roomUrl,
       }),
     );
@@ -65,7 +67,7 @@ export function JoinSession() {
         sessionId,
         roomUrl,
         token,
-        isHost: false,
+        isHost: isHostRejoin,
       },
     });
 
@@ -127,10 +129,12 @@ export function JoinSession() {
             </svg>
           </div>
           <h1 className="text-3xl font-black tracking-tight text-text md:text-4xl">
-            Join <span className="text-gradient-accent">Session</span>
+            {isHostRejoin ? "Rejoin" : "Join"} <span className="text-gradient-accent">Session</span>
           </h1>
           <p className="mt-3 text-sm text-text-muted">
-            You've been invited to an audio recording session
+            {isHostRejoin
+              ? "Rejoin your session as the host"
+              : "You've been invited to an audio recording session"}
           </p>
         </div>
 
@@ -164,9 +168,9 @@ export function JoinSession() {
                 </div>
                 <div className="flex flex-col">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                    You're joining as
+                    {isHostRejoin ? "Rejoining as Host" : "You're joining as"}
                   </span>
-                  <span className="text-sm font-medium text-text">{guestName}</span>
+                  <span className="text-sm font-medium text-text">{isHostRejoin ? hostName : guestName}</span>
                 </div>
               </div>
             </div>
@@ -189,7 +193,7 @@ export function JoinSession() {
               onClick={handleJoin}
               className="w-full"
             >
-              Join Session
+              {isHostRejoin ? "Rejoin as Host" : "Join Session"}
             </Button>
           </div>
         </Card>

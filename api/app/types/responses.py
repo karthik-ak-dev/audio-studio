@@ -45,6 +45,10 @@ class SessionResponse(BaseModel):
     guest_audio_url: Optional[str] = None
     combined_audio_url: Optional[str] = None
 
+    # Rejoin URLs (built from persisted tokens)
+    host_rejoin_url: Optional[str] = None
+    guest_rejoin_url: Optional[str] = None
+
     error_message: Optional[str] = None
     created_at: str
     updated_at: str

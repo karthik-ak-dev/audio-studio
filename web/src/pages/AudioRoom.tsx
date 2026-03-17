@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useEffect, useCallback, useRef, useState, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card } from "@/components/ui/Card";
@@ -42,7 +42,7 @@ export function AudioRoom() {
   } = useSessionApi();
 
   const [guestLink, setGuestLink] = useState<string>("");
-  const [copied, setCopied] = useState<boolean>(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [initialized, setInitialized] = useState<boolean>(false);
   const [initError, setInitError] = useState<{ title: string; message: string; onRetry?: () => void } | null>(null);
   const [pollFailCount, setPollFailCount] = useState<number>(0);
@@ -364,11 +364,10 @@ export function AudioRoom() {
     navigate(`/session/${sessionId}/complete`);
   };
 
-  const handleCopyLink = async () => {
-    if (!guestLink) return;
-    await navigator.clipboard.writeText(guestLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyLink = async (link: string, label: string) => {
+    await navigator.clipboard.writeText(link);
+    setCopied(label);
+    setTimeout(() => setCopied(null), 2000);
   };
 
   // ─── Derived state ───
@@ -520,53 +519,29 @@ export function AudioRoom() {
 
           {/* ─── Right column: Invite + Participants + Info ─── */}
           <div className="flex flex-col gap-5 lg:col-span-4">
-            {/* Guest invite link — host only */}
-            {isHost && guestLink && (
+            {/* Host sees: Invite Guest link | Guest sees: Host Rejoin link */}
+            {isHost && (guestLink || sessionState.guestRejoinUrl) && (
               <Card variant="accent">
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px] text-accent">
-                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                      </svg>
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-accent">
-                        Invite Guest
-                      </span>
-                      <p className="mt-0.5 text-[11px] text-text-muted">
-                        Share with <span className="text-text">{sessionState.guestName}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="truncate rounded-md bg-black/30 px-3 py-2 font-mono text-[10px] text-text-muted ring-1 ring-white/[0.06]">
-                    {guestLink}
-                  </div>
-
-                  <button
-                    onClick={handleCopyLink}
-                    className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-accent/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-accent transition-colors hover:bg-accent/20"
-                  >
-                    {copied ? (
-                      <>
-                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-                          <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
-                        </svg>
-                        Copied!
-                      </>
-                    ) : (
-                      <>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                          <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                        </svg>
-                        Copy Link
-                      </>
-                    )}
-                  </button>
-                </div>
+                <LinkCard
+                  label="Invite Guest"
+                  sublabel={<>Share with <span className="text-text">{sessionState.guestName}</span></>}
+                  link={guestLink || sessionState.guestRejoinUrl!}
+                  copied={copied}
+                  onCopy={handleCopyLink}
+                  copyId="guest"
+                />
+              </Card>
+            )}
+            {!isHost && sessionState.hostRejoinUrl && (
+              <Card variant="accent">
+                <LinkCard
+                  label="Help Host Rejoin"
+                  sublabel={<>Send to <span className="text-text">{sessionState.hostName}</span> if they got disconnected</>}
+                  link={sessionState.hostRejoinUrl}
+                  copied={copied}
+                  onCopy={handleCopyLink}
+                  copyId="host"
+                />
               </Card>
             )}
 
@@ -675,6 +650,70 @@ function SidebarCardSkeleton({ lines }: { lines: number }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+function LinkCard({
+  label,
+  sublabel,
+  link,
+  copied,
+  onCopy,
+  copyId,
+}: {
+  label: string;
+  sublabel: ReactNode;
+  link: string;
+  copied: string | null;
+  onCopy: (link: string, label: string) => void;
+  copyId: string;
+}) {
+  const isCopied = copied === copyId;
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px] text-accent">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+          </svg>
+        </div>
+        <div>
+          <span className="text-xs font-bold uppercase tracking-wider text-accent">
+            {label}
+          </span>
+          <p className="mt-0.5 text-[11px] text-text-muted">
+            {sublabel}
+          </p>
+        </div>
+      </div>
+
+      <div className="truncate rounded-md bg-black/30 px-3 py-2 font-mono text-[10px] text-text-muted ring-1 ring-white/[0.06]">
+        {link}
+      </div>
+
+      <button
+        onClick={() => onCopy(link, copyId)}
+        className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-accent/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-accent transition-colors hover:bg-accent/20"
+      >
+        {isCopied ? (
+          <>
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+              <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+            </svg>
+            Copied!
+          </>
+        ) : (
+          <>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+            </svg>
+            Copy Link
+          </>
+        )}
+      </button>
+    </div>
   );
 }
 

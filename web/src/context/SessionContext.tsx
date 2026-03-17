@@ -30,6 +30,8 @@ interface SessionState {
   pauseEvents: Array<{ paused_at: string; resumed_at: string | null }>;
   s3Key: string | null;
   s3ProcessedPrefix: string | null;
+  hostRejoinUrl: string | null;
+  guestRejoinUrl: string | null;
   errorMessage: string | null;
   createdAt: string | null;
 }
@@ -54,6 +56,8 @@ const initialState: SessionState = {
   pauseEvents: [],
   s3Key: null,
   s3ProcessedPrefix: null,
+  hostRejoinUrl: null,
+  guestRejoinUrl: null,
   errorMessage: null,
 };
 
@@ -130,6 +134,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         pauseEvents: s.pause_events ?? [],
         s3Key: s.s3_key,
         s3ProcessedPrefix: s.s3_processed_prefix,
+        hostRejoinUrl: s.host_rejoin_url,
+        guestRejoinUrl: s.guest_rejoin_url,
         errorMessage: s.error_message,
         createdAt: s.created_at,
       };

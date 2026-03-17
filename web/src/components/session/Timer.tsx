@@ -50,10 +50,13 @@ export function Timer({ formatted, isRecording, isPaused = false, createdAt }: T
 
       {/* Room expiry hint */}
       {createdAt && (
-        <div className="mt-1 rounded-md bg-white/[0.04] px-3 py-1.5 ring-1 ring-white/[0.06]">
+        <div className="mt-1 flex flex-col items-center gap-1 rounded-md bg-white/[0.04] px-4 py-2 ring-1 ring-white/[0.06]">
           <span className="text-xs font-medium text-text-muted">
-            Room expires approx in{" "}
+            Meet expires in{" "}
             <span className="text-accent">{formatTimeRemaining(createdAt, ROOM_EXPIRY_HOURS)}</span>
+          </span>
+          <span className="text-[10px] text-text-muted/60">
+            All recordings must finish within this time. This is not your recording length.
           </span>
         </div>
       )}

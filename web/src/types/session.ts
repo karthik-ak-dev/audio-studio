@@ -44,6 +44,10 @@ export interface Session {
   s3_key: string | null;
   s3_processed_prefix: string | null;
 
+  // Rejoin URLs
+  host_rejoin_url: string | null;
+  guest_rejoin_url: string | null;
+
   error_message: string | null;
   created_at: string;
   updated_at: string;

@@ -47,6 +47,10 @@ class Session:  # pylint: disable=too-many-instance-attributes
     pause_events: list[dict[str, Optional[str]]] = field(default_factory=list)
     s3_key: Optional[str] = None
 
+    # Daily.co tokens (persisted for rejoin)
+    host_token: Optional[str] = None
+    guest_token: Optional[str] = None
+
     # Post-processing
     s3_processed_prefix: Optional[str] = None
     host_audio_url: Optional[str] = None
@@ -97,6 +101,10 @@ class Session:  # pylint: disable=too-many-instance-attributes
             item["recording_started_at"] = self.recording_started_at
         if self.recording_stopped_at is not None:
             item["recording_stopped_at"] = self.recording_stopped_at
+        if self.host_token is not None:
+            item["host_token"] = self.host_token
+        if self.guest_token is not None:
+            item["guest_token"] = self.guest_token
         if self.s3_key is not None:
             item["s3_key"] = self.s3_key
         if self.s3_processed_prefix is not None:
@@ -153,6 +161,8 @@ class Session:  # pylint: disable=too-many-instance-attributes
             pause_events=pause_events,
             recording_started_at=_opt_str(item, "recording_started_at"),
             recording_stopped_at=_opt_str(item, "recording_stopped_at"),
+            host_token=_opt_str(item, "host_token"),
+            guest_token=_opt_str(item, "guest_token"),
             s3_key=_opt_str(item, "s3_key"),
             s3_processed_prefix=_opt_str(item, "s3_processed_prefix"),
             host_audio_url=_opt_str(item, "host_audio_url"),

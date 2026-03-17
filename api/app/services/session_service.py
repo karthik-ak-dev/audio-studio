@@ -84,6 +84,8 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
         daily_room_name=room_name,
         daily_room_url=room_url,
         status=SessionStatus.CREATED,
+        host_token=host_token,
+        guest_token=guest_token,
         created_at=now,
         updated_at=now,
         ttl=compute_ttl(),
@@ -595,6 +597,20 @@ def on_recording_error(session_id: str, error_msg: str) -> None:
 
 
 def _to_session_response(session: Session) -> SessionResponse:
+    # Build rejoin URLs from persisted tokens
+    host_rejoin_url: str | None = None
+    guest_rejoin_url: str | None = None
+    if session.host_token:
+        host_rejoin_url = (
+            f"{settings.frontend_origin}/join/{session.session_id}"
+            f"?t={session.host_token}&role=host"
+        )
+    if session.guest_token:
+        guest_rejoin_url = (
+            f"{settings.frontend_origin}/join/{session.session_id}"
+            f"?t={session.guest_token}"
+        )
+
     return SessionResponse(
         session_id=session.session_id,
         status=session.status.value,
@@ -614,6 +630,8 @@ def _to_session_response(session: Session) -> SessionResponse:
         host_audio_url=session.host_audio_url,
         guest_audio_url=session.guest_audio_url,
         combined_audio_url=session.combined_audio_url,
+        host_rejoin_url=host_rejoin_url,
+        guest_rejoin_url=guest_rejoin_url,
         error_message=session.error_message,
         created_at=session.created_at,
         updated_at=session.updated_at,
