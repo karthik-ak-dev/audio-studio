@@ -5,9 +5,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "Downloading static ffmpeg for arm64..."
+echo "Downloading static ffmpeg + ffprobe for arm64..."
 curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz \
-  | tar xJ --strip-components=1 -C "$SCRIPT_DIR" --include='*/ffmpeg'
+  | tar xJ --strip-components=1 -C "$SCRIPT_DIR" --include='*/ffmpeg' --include='*/ffprobe'
 
-chmod +x "$SCRIPT_DIR/ffmpeg"
-echo "Done: $SCRIPT_DIR/ffmpeg"
+chmod +x "$SCRIPT_DIR/ffmpeg" "$SCRIPT_DIR/ffprobe"
+echo "Done: $SCRIPT_DIR/ffmpeg, $SCRIPT_DIR/ffprobe"
