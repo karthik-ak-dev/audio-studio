@@ -230,24 +230,13 @@ export function AudioRoom() {
       !joinNotifiedRef.current
     ) {
       joinNotifiedRef.current = true;
-      const userId = daily.localUserId;
-      const connectionId = daily.localConnectionId;
-      void (async () => {
-        const joinResult = await joinSession(sessionId, {
-          user_id: userId,
-          connection_id: connectionId,
-          user_name: userName,
-        });
-        if (joinResult === "duplicate") {
-          await daily.leave();
-          setInitError({
-            title: "Already Connected",
-            message: "This session is already open in another tab. Close the other tab and refresh to rejoin.",
-          });
-        }
-      })();
+      void joinSession(sessionId, {
+        user_id: daily.localUserId,
+        connection_id: daily.localConnectionId,
+        user_name: userName,
+      });
     }
-  }, [daily.isJoined, daily.localConnectionId, daily.localUserId, sessionId, userName, joinSession, daily.leave]);
+  }, [daily.isJoined, daily.localConnectionId, daily.localUserId, sessionId, userName, joinSession]);
 
   // ─── 4. Interval poll (every 3s, silent) ───
   useEffect(() => {
