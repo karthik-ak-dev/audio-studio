@@ -53,7 +53,7 @@ export function Timer({ formatted, isRecording, isPaused = false, roomExpiresAt 
             <span className="text-accent">{formatTimeRemaining(roomExpiresAt)}</span>
           </span>
           <span className="text-[10px] text-text-muted/60">
-            All recordings must finish within this time. This is not your recording length.
+            Please wrap up your session before the meeting expires.
           </span>
         </div>
       )}

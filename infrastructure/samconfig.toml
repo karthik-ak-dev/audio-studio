@@ -17,6 +17,7 @@ confirm_changeset = true
 parameter_overrides = [
   "Environment=dev",
   "DailyDomain=ak-kgen",
+  "FrontendDomain=localhost",
   "FrontendOrigin=http://localhost:5173",
 ]
 
@@ -38,9 +39,11 @@ confirm_changeset = true
 parameter_overrides = [
   "Environment=stage",
   "DailyDomain=stage-kgen",
+  "FrontendDomain=stage-studio.kgen.io",
+  "FrontendOrigin=https://stage-studio.kgen.io",
 ]
 
-# FrontendOrigin left empty — auto-uses CloudFront URL
+# FrontendOrigin — set to your Cloudflare domain
 # Secrets — pass at deploy time:
 #   sam deploy --config-env stage --parameter-overrides \
 #     DailyApiKey=xxx DailyWebhookSecret=xxx
@@ -58,6 +61,8 @@ confirm_changeset = true
 parameter_overrides = [
   "Environment=prod",
   "DailyDomain=ak-kgen",
+  "FrontendDomain=studio.kgen.io",
+  "FrontendOrigin=https://studio.kgen.io",
 ]
 
 [prod.build.parameters]

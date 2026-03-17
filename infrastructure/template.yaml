@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   Audio Studio — Unified Infrastructure
-  S3, IAM, DynamoDB, API Gateway, API Lambda, Audio Merger Lambda, CloudFront
+  S3, IAM, DynamoDB, API Gateway, API Lambda, Audio Merger Lambda
 
 # ──────────────────────────────────────────────
 # Parameters
@@ -30,22 +30,19 @@ Parameters:
     Type: String
     Description: "Daily.co domain name (e.g. my-domain)"
 
+  FrontendDomain:
+    Type: String
+    Description: "Frontend domain without protocol (e.g. studio.kgen.io) — S3 bucket named to match for CNAME routing"
+
   FrontendOrigin:
     Type: String
-    Default: ""
-    Description: "Allowed CORS origin — leave empty to auto-use CloudFront URL"
+    Description: "Allowed CORS origin (e.g. https://studio.kgen.io)"
 
   MergeDuration:
     Type: String
     Default: "longest"
     AllowedValues: ["longest", "shortest", "first"]
     Description: "Merge duration strategy — longest (pad silence), shortest (truncate), first (match first input)"
-
-# ──────────────────────────────────────────────
-# Conditions
-# ──────────────────────────────────────────────
-Conditions:
-  HasCustomFrontendOrigin: !Not [!Equals [!Ref FrontendOrigin, ""]]
 
 # ──────────────────────────────────────────────
 # Globals
@@ -119,16 +116,19 @@ Resources:
                   - !GetAtt RecordingsBucket.Arn
                   - !Sub "${RecordingsBucket.Arn}/*"
 
-  # ─── S3: Frontend Hosting ───────────────────
+  # ─── S3: Frontend Hosting (Static Website) ──
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "audio-studio-web-${Environment}-${AWS::AccountId}"
+      BucketName: !Ref FrontendDomain
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html   # SPA — all routes resolve to index.html
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -137,56 +137,29 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: AllowCloudFrontOAC
+          - Sid: AllowPublicRead
             Effect: Allow
-            Principal:
-              Service: cloudfront.amazonaws.com
+            Principal: "*"
             Action: "s3:GetObject"
             Resource: !Sub "${FrontendBucket.Arn}/*"
+          - Sid: DenyPublicWrite
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+            Resource: !Sub "${FrontendBucket.Arn}/*"
             Condition:
-              StringEquals:
-                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
-
-  # ─── CloudFront: CDN ────────────────────────
-  FrontendOAC:
-    Type: AWS::CloudFront::OriginAccessControl
-    Properties:
-      OriginAccessControlConfig:
-        Name: !Sub "audio-studio-oac-${Environment}"
-        OriginAccessControlOriginType: s3
-        SigningBehavior: always
-        SigningProtocol: sigv4
-
-  FrontendDistribution:
-    Type: AWS::CloudFront::Distribution
-    Properties:
-      DistributionConfig:
-        Enabled: true
-        Comment: !Sub "audio-studio-cdn-${Environment}"
-        DefaultRootObject: index.html
-        HttpVersion: http2and3
-        PriceClass: PriceClass_200
-        Origins:
-          - Id: S3Origin
-            DomainName: !GetAtt FrontendBucket.RegionalDomainName
-            OriginAccessControlId: !Ref FrontendOAC
-            S3OriginConfig:
-              OriginAccessIdentity: ""
-        DefaultCacheBehavior:
-          TargetOriginId: S3Origin
-          ViewerProtocolPolicy: redirect-to-https
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
-          Compress: true
-        CustomErrorResponses:
-          # SPA — route all 404s to index.html for client-side routing
-          - ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 0
-          - ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 0
+              StringNotEquals:
+                aws:PrincipalAccount: !Ref "AWS::AccountId"
+          - Sid: DenyBucketListing
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:ListBucket"
+            Resource: !GetAtt FrontendBucket.Arn
+            Condition:
+              StringNotEquals:
+                aws:PrincipalAccount: !Ref "AWS::AccountId"
 
   # ─── DynamoDB: Sessions Table ────────────────
   SessionsTable:
@@ -234,10 +207,7 @@ Resources:
       StageName: $default
       CorsConfiguration:
         AllowOrigins:
-          - !If
-            - HasCustomFrontendOrigin
-            - !Ref FrontendOrigin
-            - !Sub "https://${FrontendDistribution.DomainName}"
+          - !Ref FrontendOrigin
         AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
         AllowHeaders: [Content-Type, Authorization, X-Api-Key]
         MaxAge: 3600
@@ -258,10 +228,7 @@ Resources:
           DAILY_API_KEY: !Ref DailyApiKey
           DAILY_WEBHOOK_SECRET: !Ref DailyWebhookSecret
           DAILY_DOMAIN: !Ref DailyDomain
-          FRONTEND_ORIGIN: !If
-            - HasCustomFrontendOrigin
-            - !Ref FrontendOrigin
-            - !Sub "https://${FrontendDistribution.DomainName}"
+          FRONTEND_ORIGIN: !Ref FrontendOrigin
           AUDIO_MERGER_FUNCTION_NAME: !Ref AudioMergerFn
       Events:
         CatchAll:
@@ -310,17 +277,13 @@ Outputs:
     Description: API Gateway endpoint URL
     Value: !Sub "https://${AudioStudioApi}.execute-api.${AWS::Region}.amazonaws.com"
 
-  FrontendUrl:
-    Description: CloudFront URL for the frontend
-    Value: !Sub "https://${FrontendDistribution.DomainName}"
+  FrontendWebsiteUrl:
+    Description: S3 website endpoint (CNAME this in Cloudflare)
+    Value: !GetAtt FrontendBucket.WebsiteURL
 
   FrontendBucketName:
     Description: S3 bucket for frontend static files
     Value: !Ref FrontendBucket
-
-  CloudFrontDistributionId:
-    Description: CloudFront distribution ID (for cache invalidation)
-    Value: !Ref FrontendDistribution
 
   RecordingsBucketName:
     Description: S3 bucket for raw and processed recordings

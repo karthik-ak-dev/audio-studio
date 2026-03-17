@@ -46,7 +46,7 @@ ffmpeg: ## Download static ffmpeg binary for Lambda (one-time)
 # Usage:
 #   make ffmpeg                  (one-time — downloads static ffmpeg for Lambda)
 #   make deploy-stage DAILY_API_KEY=xxx    (DAILY_API_KEY = Daily.co API key)
-#   make deploy-stage-fe         (build + push frontend to S3 + invalidate CF)
+#   make deploy-stage-fe         (build + push frontend to S3)
 
 deploy-stage: ## Deploy backend to stage (DAILY_API_KEY=xxx [DAILY_WEBHOOK_SECRET=xxx])
 	@test -f audio-merger/bin/ffmpeg -a -f audio-merger/bin/ffprobe || (echo "Error: run 'make ffmpeg' first" && exit 1)
@@ -59,7 +59,9 @@ deploy-stage: ## Deploy backend to stage (DAILY_API_KEY=xxx [DAILY_WEBHOOK_SECRE
 		"Environment=stage" \
 		"DailyDomain=stage-kgen" \
 		"DailyApiKey=$(DAILY_API_KEY)" \
-		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)"
+		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)" \
+		"FrontendDomain=stage-studio.kgen.io" \
+		"FrontendOrigin=$(or $(FRONTEND_ORIGIN),https://stage-studio.kgen.io)"
 
 deploy-stage-fe: ## Deploy frontend to stage
 	@$(eval API_URL := $(shell aws cloudformation describe-stacks \
@@ -68,12 +70,8 @@ deploy-stage-fe: ## Deploy frontend to stage
 	@$(eval FE_BUCKET := $(shell aws cloudformation describe-stacks \
 		--stack-name audio-studio-stage --region ap-south-1 \
 		--query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text))
-	@$(eval CF_DIST := $(shell aws cloudformation describe-stacks \
-		--stack-name audio-studio-stage --region ap-south-1 \
-		--query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" --output text))
 	cd web && VITE_API_BASE_URL=$(API_URL) npm run build
 	aws s3 sync web/dist/ s3://$(FE_BUCKET)/ --delete
-	aws cloudfront create-invalidation --distribution-id $(CF_DIST) --paths "/*"
 
 # ──────────────────────────────────────────────
 # Prod Deployment
@@ -90,7 +88,9 @@ deploy-prod: ## Deploy backend to prod (DAILY_API_KEY=xxx [DAILY_WEBHOOK_SECRET=
 		"Environment=prod" \
 		"DailyDomain=ak-kgen" \
 		"DailyApiKey=$(DAILY_API_KEY)" \
-		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)"
+		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)" \
+		"FrontendDomain=studio.kgen.io" \
+		"FrontendOrigin=$(or $(FRONTEND_ORIGIN),https://studio.kgen.io)"
 
 deploy-prod-fe: ## Deploy frontend to prod
 	@$(eval API_URL := $(shell aws cloudformation describe-stacks \
@@ -99,12 +99,8 @@ deploy-prod-fe: ## Deploy frontend to prod
 	@$(eval FE_BUCKET := $(shell aws cloudformation describe-stacks \
 		--stack-name audio-studio-prod --region ap-south-1 \
 		--query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text))
-	@$(eval CF_DIST := $(shell aws cloudformation describe-stacks \
-		--stack-name audio-studio-prod --region ap-south-1 \
-		--query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" --output text))
 	cd web && VITE_API_BASE_URL=$(API_URL) npm run build
 	aws s3 sync web/dist/ s3://$(FE_BUCKET)/ --delete
-	aws cloudfront create-invalidation --distribution-id $(CF_DIST) --paths "/*"
 
 # ──────────────────────────────────────────────
 # Cleanup
