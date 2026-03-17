@@ -1,13 +1,27 @@
+import { ROOM_EXPIRY_HOURS } from "@/config/constants";
+
 interface TimerProps {
   formatted: string;
-  progress: number;
   isRecording: boolean;
   isPaused?: boolean;
+  /** Session created_at ISO timestamp — used to compute room expiry */
+  createdAt?: string | null;
 }
 
-export function Timer({ formatted, progress, isRecording, isPaused = false }: TimerProps) {
-  const progressPercent = Math.min(progress * 100, 100);
+function formatTimeRemaining(createdAt: string, expiryHours: number): string {
+  const expiresAt = new Date(createdAt).getTime() + expiryHours * 60 * 60 * 1000;
+  const remaining = expiresAt - Date.now();
+  if (remaining <= 0) return "expired";
+  const mins = Math.floor(remaining / 60000);
+  if (mins >= 60) {
+    const hrs = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${hrs}h ${m}m` : `${hrs}h`;
+  }
+  return `${mins}m`;
+}
 
+export function Timer({ formatted, isRecording, isPaused = false, createdAt }: TimerProps) {
   const statusLabel = isRecording ? "Recording" : isPaused ? "Paused" : "Ready";
   const statusColor = isRecording ? "text-red-400" : isPaused ? "text-yellow-400" : "text-text-muted";
 
@@ -34,15 +48,15 @@ export function Timer({ formatted, progress, isRecording, isPaused = false }: Ti
         {formatted}
       </span>
 
-      {/* Progress bar */}
-      <div className="h-1 w-full max-w-[280px] overflow-hidden rounded-full bg-white/[0.06]">
-        <div
-          className={`h-full rounded-full transition-all duration-1000 ease-linear ${
-            isRecording ? "bg-red-500/60" : isPaused ? "bg-yellow-400/40" : "bg-accent/30"
-          }`}
-          style={{ width: `${progressPercent}%` }}
-        />
-      </div>
+      {/* Room expiry hint */}
+      {createdAt && (
+        <div className="mt-1 rounded-md bg-white/[0.04] px-3 py-1.5 ring-1 ring-white/[0.06]">
+          <span className="text-xs font-medium text-text-muted">
+            Room expires approx in{" "}
+            <span className="text-accent">{formatTimeRemaining(createdAt, ROOM_EXPIRY_HOURS)}</span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

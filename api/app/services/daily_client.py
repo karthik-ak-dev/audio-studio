@@ -9,8 +9,7 @@ import httpx
 from app.config import settings
 from app.constants import (
     MAX_PARTICIPANTS,
-    ROOM_EXPIRY_BUFFER_SEC,
-    MAX_SESSION_DURATION_SEC,
+    ROOM_EXPIRY_SEC,
     MIN_IDLE_TIMEOUT_SEC,
     SFU_SWITCHOVER,
     AUDIO_ONLY_SEND,
@@ -51,7 +50,7 @@ class DailyClient:
                         "enable_emoji_reactions": False,
                         "eject_at_room_exp": True,
                         "enforce_unique_user_ids": True,
-                        "exp": int(time.time()) + ROOM_EXPIRY_BUFFER_SEC,
+                        "exp": int(time.time()) + ROOM_EXPIRY_SEC,
                         "sfu_switchover": SFU_SWITCHOVER,
                     },
                 },
@@ -86,7 +85,7 @@ class DailyClient:
                         "is_owner": is_owner,
                         "user_name": user_name,
                         "user_id": user_id,
-                        "exp": int(time.time()) + ROOM_EXPIRY_BUFFER_SEC,
+                        "exp": int(time.time()) + ROOM_EXPIRY_SEC,
                         "eject_at_token_exp": True,
                         "enable_recording": "raw-tracks",
                         "permissions": permissions,
@@ -112,7 +111,7 @@ class DailyClient:
                 json={
                     "type": "raw-tracks",
                     "layout": {"preset": "raw-tracks-audio-only"},
-                    "maxDuration": MAX_SESSION_DURATION_SEC,
+                    "maxDuration": ROOM_EXPIRY_SEC,
                     "minIdleTimeOut": MIN_IDLE_TIMEOUT_SEC,
                 },
                 timeout=10.0,

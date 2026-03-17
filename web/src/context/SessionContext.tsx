@@ -31,6 +31,7 @@ interface SessionState {
   s3Key: string | null;
   s3ProcessedPrefix: string | null;
   errorMessage: string | null;
+  createdAt: string | null;
 }
 
 const initialState: SessionState = {
@@ -47,6 +48,7 @@ const initialState: SessionState = {
   participantCount: 0,
   activeParticipants: [],
   participantsRoster: {},
+  createdAt: null,
   recordingStartedAt: null,
   recordingStoppedAt: null,
   pauseEvents: [],
@@ -129,6 +131,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         s3Key: s.s3_key,
         s3ProcessedPrefix: s.s3_processed_prefix,
         errorMessage: s.error_message,
+        createdAt: s.created_at,
       };
     }
 

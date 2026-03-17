@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MAX_RECORDING_DURATION_SEC } from "@/config/constants";
 
 interface PauseEvent {
   paused_at: string;
@@ -9,7 +8,6 @@ interface PauseEvent {
 interface UseRecordingTimerReturn {
   elapsedSeconds: number;
   formatted: string;
-  progress: number;
   isRunning: boolean;
   /**
    * Compute elapsed recording time from server timestamps.
@@ -123,7 +121,6 @@ export function useRecordingTimer(): UseRecordingTimerReturn {
   return {
     elapsedSeconds,
     formatted: formatTime(elapsedSeconds),
-    progress: elapsedSeconds / MAX_RECORDING_DURATION_SEC,
     isRunning,
     sync,
     reset,

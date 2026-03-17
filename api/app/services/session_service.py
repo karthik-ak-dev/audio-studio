@@ -559,8 +559,28 @@ def on_recording_error(session_id: str, error_msg: str) -> None:
     """Webhook: recording.error — PRIMARY (not reconciliation).
 
     This is the ONLY way to know about server-side recording failures.
-    ERROR is terminal — always applied regardless of current status.
+
+    Special case: "recording-max-time-limit" is NOT a real error — it means
+    Daily auto-stopped the recording because maxDuration was reached. The audio
+    was recorded successfully. Treat it as a graceful end → processing.
+    The recording.ready-to-download webhook will follow and trigger the merger.
+
+    All other errors are terminal.
     """
+    # maxDuration reached — graceful end, not an error
+    if "max-time-limit" in error_msg:
+        logger.info(
+            "Recording max duration reached: session=%s — transitioning to processing",
+            session_id,
+        )
+        session_repo.conditional_update_status(
+            session_id=session_id,
+            new_status=SessionStatus.PROCESSING,
+            required_status=[SessionStatus.RECORDING, SessionStatus.PAUSED],
+            recording_stopped_at=now_iso(),
+        )
+        return
+
     logger.error(
         "Recording error: session=%s error=%s", session_id, error_msg,
     )

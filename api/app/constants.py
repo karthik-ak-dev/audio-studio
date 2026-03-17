@@ -18,8 +18,7 @@ class SessionStatus(StrEnum):
 
 # Daily.co room configuration
 MAX_PARTICIPANTS: int = 2
-ROOM_EXPIRY_BUFFER_SEC: int = 7200
-MAX_SESSION_DURATION_SEC: int = 3600
+ROOM_EXPIRY_SEC: int = 3600  # 1 hour — room + recording expire together
 MIN_IDLE_TIMEOUT_SEC: int = 600
 SFU_SWITCHOVER: float = 0.5
 

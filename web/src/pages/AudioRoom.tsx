@@ -486,9 +486,9 @@ export function AudioRoom() {
                   {/* Timer */}
                   <Timer
                     formatted={timer.formatted}
-                    progress={timer.progress}
                     isRecording={isRecording}
                     isPaused={isPaused}
+                    createdAt={sessionState.createdAt}
                   />
 
                   {/* Mute button */}
