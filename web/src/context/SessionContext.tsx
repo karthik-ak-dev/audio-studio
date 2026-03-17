@@ -34,6 +34,7 @@ interface SessionState {
   guestRejoinUrl: string | null;
   errorMessage: string | null;
   createdAt: string | null;
+  roomExpiresAt: string | null;
 }
 
 const initialState: SessionState = {
@@ -59,6 +60,7 @@ const initialState: SessionState = {
   hostRejoinUrl: null,
   guestRejoinUrl: null,
   errorMessage: null,
+  roomExpiresAt: null,
 };
 
 // ─── Actions ─────────────────────────────────────
@@ -137,6 +139,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         hostRejoinUrl: s.host_rejoin_url,
         guestRejoinUrl: s.guest_rejoin_url,
         errorMessage: s.error_message,
+        roomExpiresAt: s.room_expires_at,
         createdAt: s.created_at,
       };
     }

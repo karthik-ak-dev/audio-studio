@@ -31,9 +31,14 @@ class DailyClient:
         }
 
     async def create_room(self, session_id: str) -> dict[str, object]:
-        """Create an audio-only, 2-person private room."""
+        """Create an audio-only, 2-person private room.
+
+        Returns the full Daily API response. The room expiry unix timestamp
+        is available at response["config"]["exp"].
+        """
         room_name: str = f"session-{session_id}"
-        logger.info("Daily API: creating room session=%s room=%s", session_id, room_name)
+        room_exp: int = int(time.time()) + ROOM_EXPIRY_SEC
+        logger.info("Daily API: creating room session=%s room=%s exp=%d", session_id, room_name, room_exp)
         async with httpx.AsyncClient() as client:
             response: httpx.Response = await client.post(
                 f"{self.base_url}/rooms",
@@ -50,7 +55,7 @@ class DailyClient:
                         "enable_emoji_reactions": False,
                         "eject_at_room_exp": True,
                         "enforce_unique_user_ids": True,
-                        "exp": int(time.time()) + ROOM_EXPIRY_SEC,
+                        "exp": room_exp,
                         "sfu_switchover": SFU_SWITCHOVER,
                     },
                 },
@@ -111,7 +116,6 @@ class DailyClient:
                 json={
                     "type": "raw-tracks",
                     "layout": {"preset": "raw-tracks-audio-only"},
-                    "maxDuration": ROOM_EXPIRY_SEC,
                     "minIdleTimeOut": MIN_IDLE_TIMEOUT_SEC,
                 },
                 timeout=10.0,

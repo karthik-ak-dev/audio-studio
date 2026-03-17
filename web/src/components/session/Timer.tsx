@@ -1,18 +1,15 @@
-import { ROOM_EXPIRY_HOURS } from "@/config/constants";
-
 interface TimerProps {
   formatted: string;
   isRecording: boolean;
   isPaused?: boolean;
-  /** Session created_at ISO timestamp — used to compute room expiry */
-  createdAt?: string | null;
+  /** Room expiry ISO timestamp from the server */
+  roomExpiresAt?: string | null;
 }
 
-function formatTimeRemaining(createdAt: string, expiryHours: number): string {
-  const expiresAt = new Date(createdAt).getTime() + expiryHours * 60 * 60 * 1000;
-  const remaining = expiresAt - Date.now();
-  if (remaining <= 0) return "expired";
-  const mins = Math.floor(remaining / 60000);
+function formatTimeRemaining(expiresAt: string): string {
+  const remaining = new Date(expiresAt).getTime() - Date.now();
+  if (remaining <= 0) return "1m";
+  const mins = Math.max(1, Math.floor(remaining / 60000));
   if (mins >= 60) {
     const hrs = Math.floor(mins / 60);
     const m = mins % 60;
@@ -21,7 +18,7 @@ function formatTimeRemaining(createdAt: string, expiryHours: number): string {
   return `${mins}m`;
 }
 
-export function Timer({ formatted, isRecording, isPaused = false, createdAt }: TimerProps) {
+export function Timer({ formatted, isRecording, isPaused = false, roomExpiresAt }: TimerProps) {
   const statusLabel = isRecording ? "Recording" : isPaused ? "Paused" : "Ready";
   const statusColor = isRecording ? "text-red-400" : isPaused ? "text-yellow-400" : "text-text-muted";
 
@@ -49,11 +46,11 @@ export function Timer({ formatted, isRecording, isPaused = false, createdAt }: T
       </span>
 
       {/* Room expiry hint */}
-      {createdAt && (
+      {roomExpiresAt && (
         <div className="mt-1 flex flex-col items-center gap-1 rounded-md bg-white/[0.04] px-4 py-2 ring-1 ring-white/[0.06]">
           <span className="text-xs font-medium text-text-muted">
-            Meet expires in{" "}
-            <span className="text-accent">{formatTimeRemaining(createdAt, ROOM_EXPIRY_HOURS)}</span>
+            Meet approx expires in{" "}
+            <span className="text-accent">{formatTimeRemaining(roomExpiresAt)}</span>
           </span>
           <span className="text-[10px] text-text-muted/60">
             All recordings must finish within this time. This is not your recording length.

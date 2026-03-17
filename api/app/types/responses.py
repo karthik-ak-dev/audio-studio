@@ -52,6 +52,7 @@ class SessionResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
+    room_expires_at: Optional[str] = None
 
 
 class SessionActionResponse(BaseModel):

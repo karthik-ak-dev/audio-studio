@@ -51,6 +51,7 @@ export interface Session {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  room_expires_at: string | null;
 }
 
 export interface SessionActionResponse {

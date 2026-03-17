@@ -109,10 +109,17 @@ export function AudioRoom() {
         });
         return;
       }
+      // Room expiry — don't show error banner; the poll will catch the
+      // terminal status and redirect to /complete automatically.
+      const isRoomExpiry = error.toLowerCase().includes("meeting has ended")
+        || error.toLowerCase().includes("exp");
+      if (isRoomExpiry) return;
+
       setSdkError(error);
     },
     [],
   );
+  
 
   const daily = useDaily({
     roomUrl,
@@ -250,8 +257,11 @@ export function AudioRoom() {
   }, [daily.isJoined, daily.localConnectionId, daily.localUserId, sessionId, userName, joinSession]);
 
   // ─── 4. Interval poll (every 3s, silent) ───
+  // Gated on `initialized` (not `daily.isJoined`) so polling continues
+  // after Daily disconnects (e.g. room expiry ejection) and catches
+  // terminal status updates from webhooks.
   useEffect(() => {
-    if (!sessionId || !daily.isJoined) return;
+    if (!sessionId || !initialized) return;
 
     let active = true;
 
@@ -277,7 +287,7 @@ export function AudioRoom() {
       active = false;
       clearInterval(poll);
     };
-  }, [sessionId, daily.isJoined, pollSession, dispatch, navigate]);
+  }, [sessionId, initialized, pollSession, dispatch, navigate]);
 
   // ─── 5. Sync timer with server recording state ───
   useEffect(() => {
@@ -487,7 +497,7 @@ export function AudioRoom() {
                     formatted={timer.formatted}
                     isRecording={isRecording}
                     isPaused={isPaused}
-                    createdAt={sessionState.createdAt}
+                    roomExpiresAt={sessionState.roomExpiresAt}
                   />
 
                   {/* Mute button */}

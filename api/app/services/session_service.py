@@ -40,7 +40,7 @@ from app.types.responses import (
     SessionResponse,
     SessionActionResponse,
 )
-from app.utils.time import now_iso, compute_ttl
+from app.utils.time import now_iso, unix_to_iso
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -61,6 +61,8 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     room: dict[str, object] = await daily_client.create_room(session_id)
     room_name: str = str(room["name"])
     room_url: str = str(room["url"])
+    room_config: dict[str, object] = room.get("config", {})  # type: ignore[assignment]
+    room_expires_at: str = unix_to_iso(int(room_config["exp"]))
 
     host_token: str = await daily_client.create_token(
         room_name=room_name,
@@ -88,7 +90,7 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
         guest_token=guest_token,
         created_at=now,
         updated_at=now,
-        ttl=compute_ttl(),
+        room_expires_at=room_expires_at,
     )
     session_repo.create(session)
 
@@ -482,6 +484,20 @@ async def on_participant_left(
             "Webhook regress: participant left — session=%s ready -> waiting_for_guest",
             session_id,
         )
+        return
+
+    # All participants gone + recording never started → room expired or everyone left
+    if count == 0 and updated.status in (
+        SessionStatus.CREATED, SessionStatus.WAITING_FOR_GUEST, SessionStatus.READY,
+    ):
+        logger.info(
+            "Webhook: all participants left, recording never started — session=%s status=%s",
+            session_id, updated.status.value,
+        )
+        session_repo.update_status(
+            session_id, SessionStatus.ERROR,
+            error_message="Room expired — recording was never started",
+        )
 
 
 async def on_recording_ready_to_download(
@@ -561,28 +577,12 @@ def on_recording_error(session_id: str, error_msg: str) -> None:
     """Webhook: recording.error — PRIMARY (not reconciliation).
 
     This is the ONLY way to know about server-side recording failures.
+    All recording errors are terminal → mark session as error.
 
-    Special case: "recording-max-time-limit" is NOT a real error — it means
-    Daily auto-stopped the recording because maxDuration was reached. The audio
-    was recorded successfully. Treat it as a graceful end → processing.
-    The recording.ready-to-download webhook will follow and trigger the merger.
-
-    All other errors are terminal.
+    Note: maxDuration is NOT set on recordings — room expiry (eject_at_room_exp)
+    is the single expiry mechanism. Room expiry auto-stops any active recording
+    and triggers recording.ready-to-download (not recording.error).
     """
-    # maxDuration reached — graceful end, not an error
-    if "max-time-limit" in error_msg:
-        logger.info(
-            "Recording max duration reached: session=%s — transitioning to processing",
-            session_id,
-        )
-        session_repo.conditional_update_status(
-            session_id=session_id,
-            new_status=SessionStatus.PROCESSING,
-            required_status=[SessionStatus.RECORDING, SessionStatus.PAUSED],
-            recording_stopped_at=now_iso(),
-        )
-        return
-
     logger.error(
         "Recording error: session=%s error=%s", session_id, error_msg,
     )
@@ -635,6 +635,7 @@ def _to_session_response(session: Session) -> SessionResponse:
         error_message=session.error_message,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        room_expires_at=session.room_expires_at,
     )
 
 

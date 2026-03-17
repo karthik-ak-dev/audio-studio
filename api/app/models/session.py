@@ -58,10 +58,10 @@ class Session:  # pylint: disable=too-many-instance-attributes
     combined_audio_url: Optional[str] = None
     error_message: Optional[str] = None
 
-    # Timestamps
+    # Timestamp
     created_at: str = ""
     updated_at: str = ""
-    ttl: int = 0
+    room_expires_at: Optional[str] = None
 
     @property
     def participant_count(self) -> int:
@@ -82,8 +82,10 @@ class Session:  # pylint: disable=too-many-instance-attributes
             "recording_id": self.recording_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "ttl": self.ttl,
         }
+
+        if self.room_expires_at is not None:
+            item["room_expires_at"] = self.room_expires_at
 
         # DynamoDB String Set — must be non-empty to store, omit if empty
         if self.active_participants:
@@ -171,5 +173,5 @@ class Session:  # pylint: disable=too-many-instance-attributes
             error_message=_opt_str(item, "error_message"),
             created_at=str(item.get("created_at", "")),
             updated_at=str(item.get("updated_at", "")),
-            ttl=int(item.get("ttl", 0)),  # type: ignore[arg-type]
+            room_expires_at=_opt_str(item, "room_expires_at"),
         )
