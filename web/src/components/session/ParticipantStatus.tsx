@@ -10,6 +10,8 @@ interface ParticipantStatusProps {
   sdkParticipants: DailyParticipant[];
   /** Local user's user_id */
   localUserId: string | null;
+  /** Local user's mute state (single source of truth from useDaily) */
+  isMuted: boolean;
 }
 
 export function ParticipantStatus({
@@ -17,14 +19,22 @@ export function ParticipantStatus({
   activeParticipants,
   sdkParticipants,
   localUserId,
+  isMuted,
 }: ParticipantStatusProps) {
   const activeSet = new Set(activeParticipants);
   const rosterEntries = Object.entries(participantsRoster);
 
-  // Build a lookup from userId → SDK audio state
+  // Build a lookup from userId → audio state
+  // Local user: use isMuted prop (single source of truth, since track.enabled
+  // doesn't update SDK's participant.audio)
+  // Remote users: use SDK's p.audio, patched by app-message overrides in useDaily
   const sdkAudioMap = new Map<string, boolean>();
   for (const p of sdkParticipants) {
-    sdkAudioMap.set(p.user_id, p.audio);
+    if (p.local) {
+      sdkAudioMap.set(p.user_id, !isMuted);
+    } else {
+      sdkAudioMap.set(p.user_id, p.audio);
+    }
   }
 
   return (

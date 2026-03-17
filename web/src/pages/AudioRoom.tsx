@@ -579,6 +579,7 @@ export function AudioRoom() {
                     activeParticipants={sessionState.activeParticipants}
                     sdkParticipants={daily.participants}
                     localUserId={daily.localUserId}
+                    isMuted={daily.isMuted}
                   />
                 </Card>
 

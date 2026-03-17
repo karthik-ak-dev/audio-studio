@@ -103,6 +103,7 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
     );
 
     // Patch remote audio state from app-message overrides
+    // (track.enabled doesn't update SDK's participant.audio for remote peers)
     for (const m of mapped) {
       const muted = remoteMuteRef.current.get(m.session_id);
       if (!m.local && muted !== undefined) {
