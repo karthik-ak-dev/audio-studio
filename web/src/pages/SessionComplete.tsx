@@ -199,16 +199,6 @@ export function SessionComplete() {
                   </svg>
                   <span className="text-sm font-medium text-accent">Audio files ready</span>
                 </div>
-                {session.s3_key && (
-                  <p className="mt-2 break-all font-mono text-[10px] text-text-muted">
-                    {session.s3_key}
-                  </p>
-                )}
-                {session.s3_processed_prefix && (
-                  <p className="mt-1 break-all font-mono text-[10px] text-text-muted">
-                    {session.s3_processed_prefix}
-                  </p>
-                )}
               </div>
             )}
 
