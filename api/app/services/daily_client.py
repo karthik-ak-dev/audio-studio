@@ -50,6 +50,7 @@ class DailyClient:
                         "enable_chat": False,
                         "enable_emoji_reactions": False,
                         "eject_at_room_exp": True,
+                        "enforce_unique_user_ids": True,
                         "exp": int(time.time()) + ROOM_EXPIRY_BUFFER_SEC,
                         "sfu_switchover": SFU_SWITCHOVER,
                     },

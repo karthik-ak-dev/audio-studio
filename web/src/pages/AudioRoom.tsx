@@ -44,7 +44,7 @@ export function AudioRoom() {
   const [guestLink, setGuestLink] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
   const [initialized, setInitialized] = useState<boolean>(false);
-  const [initError, setInitError] = useState<{ title: string; message: string } | null>(null);
+  const [initError, setInitError] = useState<{ title: string; message: string; onRetry?: () => void } | null>(null);
   const [pollFailCount, setPollFailCount] = useState<number>(0);
   const [sdkError, setSdkError] = useState<string | null>(null);
   const joinNotifiedRef = useRef<boolean>(false);
@@ -98,6 +98,17 @@ export function AudioRoom() {
 
   const handleDailyError = useCallback(
     (error: string) => {
+      // Daily ejects the old tab when enforce_unique_user_ids is enabled
+      // and the same user_id joins from another tab/browser.
+      const isEjected = error.toLowerCase().includes("duplicate") || error.toLowerCase().includes("ejected");
+      if (isEjected) {
+        setInitError({
+          title: "Already Connected",
+          message: "This session was opened in another tab. Close this tab or rejoin here.",
+          onRetry: () => window.location.reload(),
+        });
+        return;
+      }
       setSdkError(error);
     },
     [],
@@ -213,10 +224,10 @@ export function AudioRoom() {
 
   // ─── 2. Auto-join Daily room ───
   useEffect(() => {
-    if (roomUrl && token && !daily.isJoined && initialized && !sdkError) {
+    if (roomUrl && token && !daily.isJoined && initialized && !sdkError && !initError) {
       void daily.join();
     }
-  }, [roomUrl, token, daily.isJoined, daily.join, initialized, sdkError]);
+  }, [roomUrl, token, daily.isJoined, daily.join, initialized, sdkError, initError]);
 
   // ─── 3. Notify server of join (blocking, once, with retry) ───
   const userName = isHost ? (sessionState.hostName ?? "") : (sessionState.guestName ?? "");
@@ -387,7 +398,7 @@ export function AudioRoom() {
         <ErrorState
           title={initError.title}
           message={initError.message}
-          onRetry={() => navigate("/")}
+          onRetry={initError.onRetry ?? (() => navigate("/"))}
           centered
         />
       </PageContainer>

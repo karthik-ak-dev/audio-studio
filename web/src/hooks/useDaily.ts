@@ -104,8 +104,9 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
 
     // Patch remote audio state from app-message overrides
     for (const m of mapped) {
-      if (!m.local && remoteMuteRef.current.has(m.session_id)) {
-        m.audio = !remoteMuteRef.current.get(m.session_id)!;
+      const muted = remoteMuteRef.current.get(m.session_id);
+      if (!m.local && muted !== undefined) {
+        m.audio = !muted;
       }
     }
 
@@ -176,10 +177,6 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
         }
       });
 
-      call.on("left-meeting", () => {
-        setState(initialState);
-      });
-
       // Participant events — update local SDK state, sync remote audio, trigger server poll
       call.on(
         "participant-joined",
@@ -187,6 +184,13 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
           updateParticipants(call);
           syncRemoteAudio(call);
           onSdkEvent?.("participant-joined");
+
+          // Re-broadcast our mute state so the new participant picks it up
+          // (track.enabled doesn't propagate via SFU)
+          const localTrack = call.participants().local?.tracks?.audio?.persistentTrack;
+          if (localTrack && !localTrack.enabled) {
+            call.sendAppMessage({ type: "mute-state", muted: true }, "*");
+          }
         },
       );
 
@@ -240,6 +244,20 @@ export function useDaily({ roomUrl, token, onSdkEvent, onError }: UseDailyOption
 
       call.on("recording-stopped", () => {
         onSdkEvent?.("recording-stopped");
+      });
+
+      // Ejected — Daily removed us because another tab joined with the same user_id
+      // (enforce_unique_user_ids is enabled on the room)
+      call.on("left-meeting", (event) => {
+        const reason = (event as { action?: string })?.action;
+        if (reason === "ejected") {
+          callRef.current = null;
+          call.destroy();
+          setState(initialState);
+          onError?.("This session was opened in another tab.");
+          return;
+        }
+        setState(initialState);
       });
 
       call.on("error", (event) => {
