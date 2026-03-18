@@ -38,7 +38,7 @@ make deploy-stage DAILY_API_KEY=<your-api-key>
 | **DynamoDB Table** (`audio-studio-sessions-{env}`) | Session state, participants, pause events |
 | **API Gateway + API Lambda** | FastAPI backend for session management |
 | **Audio Merger Lambda** | ffmpeg-based audio processor (triggered by webhook) |
-| **CloudFront + S3** | Frontend hosting |
+| **S3 Static Website** | Frontend hosting (proxied via Cloudflare) |
 
 ### Get the stack outputs
 
@@ -59,7 +59,7 @@ Key outputs needed:
 | `RecordingsBucketName` | Step 4 (S3 storage config) |
 | `DailyRecordingsRoleArn` | Step 4 (S3 storage config) |
 | `ApiUrl` | Step 5 (webhook URL) |
-| `FrontendUrl` | Your CloudFront URL |
+| `FrontendWebsiteUrl` | S3 website endpoint (CNAME in Cloudflare) |
 
 ## 4. Configure Daily.co S3 Storage
 
@@ -118,7 +118,8 @@ curl -X POST "https://api.daily.co/v1/webhooks" \
       "recording.ready-to-download",
       "recording.error",
       "participant.joined",
-      "participant.left"
+      "participant.left",
+      "meeting.ended"
     ]
   }'
 ```
@@ -163,7 +164,7 @@ This ensures all incoming webhook requests are verified via HMAC-SHA256 — reje
 make deploy-stage-fe
 ```
 
-Auto-reads API URL from CloudFormation outputs, builds the frontend with `VITE_API_BASE_URL`, syncs to S3, and invalidates CloudFront cache.
+Auto-reads API URL from CloudFormation outputs, builds the frontend with `VITE_API_BASE_URL`, and syncs to S3.
 
 ## 8. Verify End-to-End
 
@@ -223,7 +224,7 @@ Rooms are created programmatically via the Daily API. Settings are in `api/app/c
 | `sfu_switchover` | `0.5` | Always use SFU mode |
 | `room expiry` | `7200s` | 2 hour buffer |
 | `max recording duration` | `3600s` | 1 hour max |
-| `idle timeout` | `600s` | 10 min idle before auto-stop |
+| `idle timeout` | `300s` | 5 min idle before auto-stop |
 
 ---
 

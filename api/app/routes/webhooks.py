@@ -10,10 +10,11 @@ Role in the architecture:
   - SAFETY NET: Catch events the FE cannot report — browser crashes, network
     drops, and server-side recording errors (recording.error).
 
-Webhook events handled (4 events):
+Webhook events handled (5 events):
   participant.joined          → Reconciliation: same atomic join as FE endpoint
-  participant.left            → Safety net: stale detection + auto-pause on crash
-  recording.ready-to-download → Store s3_key for processing pipeline
+  participant.left            → Safety net: stale detection + auto-pause + expiry detection
+  meeting.ended               → Cleanup: mark abandoned pre-recording sessions as error
+  recording.ready-to-download → Store s3_key + transition to processing + invoke audio-merger
   recording.error             → Primary: only source for server-side recording failures
 
 Events NOT handled:
@@ -41,6 +42,7 @@ from app.config import settings
 from app.services import session_service
 from app.types.webhooks import (
     ParticipantPayload,
+    MeetingEndedPayload,
     RecordingReadyPayload,
     RecordingErrorPayload,
 )
@@ -175,6 +177,13 @@ async def daily_webhook(request: Request) -> dict[str, str]:
             user_id=parsed.user_id,
             connection_id=parsed.session_id,  # Daily's per-connection ID
         )
+
+    # ─── Meeting events (use payload.room) ─────────────
+    elif event_type == "meeting.ended":
+        parsed_meeting = MeetingEndedPayload(**payload)
+        session_id = _extract_session_id(parsed_meeting.room)
+        logger.info("Webhook meeting.ended: session=%s", session_id)
+        await session_service.on_meeting_ended(session_id=session_id)
 
     # ─── Recording events (use payload.room_name) ──────────
     elif event_type == "recording.ready-to-download":

@@ -25,6 +25,7 @@ Session lifecycle:
 import json
 import uuid
 import logging
+from datetime import datetime, timezone
 
 import boto3
 import httpx
@@ -356,10 +357,11 @@ async def list_sessions_by_host(host_user_id: str, limit: int = 20) -> list[Sess
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Webhook event handlers (reconciliation + safety net)
 #
-# 4 events handled:
+# 5 events handled:
 #   participant.joined        — reconciliation (same atomic join update)
-#   participant.left          — safety net (stale detection + auto-pause)
-#   recording.ready-to-download — store s3_key for processing pipeline
+#   participant.left          — safety net (stale detection + auto-pause + expiry detection)
+#   meeting.ended             — cleanup: mark abandoned pre-recording sessions as error
+#   recording.ready-to-download — transition to processing + store s3_key + invoke audio-merger
 #   recording.error           — primary (terminal, always applies)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -456,11 +458,15 @@ async def on_participant_left(
 
     # CURRENT — user really disconnected → proceed with removal
     logger.info(
-        "Webhook: participant.left user=%s conn=%s — real disconnect — session=%s",
-        user_id, connection_id, session_id,
+        "Webhook: participant.left user=%s conn=%s — real disconnect — session=%s status=%s",
+        user_id, connection_id, session_id, session.status.value,
     )
     updated: Session = session_repo.remove_participant(session_id, user_id)
     count: int = updated.participant_count
+    logger.info(
+        "Webhook: participant.left — after removal: session=%s count=%d status=%s",
+        session_id, count, updated.status.value,
+    )
 
     # Auto-pause if participant left during recording (logical — recording keeps running)
     if count < 2 and updated.status == SessionStatus.RECORDING:
@@ -486,18 +492,84 @@ async def on_participant_left(
         )
         return
 
-    # All participants gone + recording never started → room expired or everyone left
+    # All participants gone + recording never started → mark as error ONLY if room expired.
+    # If room still has time left, this is likely a refresh (participant will rejoin).
     if count == 0 and updated.status in (
         SessionStatus.CREATED, SessionStatus.WAITING_FOR_GUEST, SessionStatus.READY,
     ):
+        room_expired = False
+        if updated.room_expires_at:
+            expires_at = datetime.fromisoformat(updated.room_expires_at.replace("Z", "+00:00"))
+            room_expired = datetime.now(timezone.utc) >= expires_at
+
+        if room_expired:
+            logger.info(
+                "Webhook: room expired, recording never started — session=%s status=%s",
+                session_id, updated.status.value,
+            )
+            session_repo.update_status(
+                session_id, SessionStatus.ERROR,
+                error_message="Meeting expired — recording was never started",
+            )
+        else:
+            logger.info(
+                "Webhook: all participants left but room still active — session=%s "
+                "expires_at=%s — skipping error (likely refresh)",
+                session_id, updated.room_expires_at,
+            )
+
+
+async def on_meeting_ended(session_id: str) -> None:
+    """Webhook: meeting.ended — fires ~20s after the last participant leaves.
+
+    Handles Gap 1: both users leave voluntarily before recording started,
+    room hasn't expired. No recording to save — mark as error.
+
+    Guard: only acts if participant_count == 0. If someone has already
+    rejoined (e.g. page refresh completes in 1-3s), count > 0 → skip.
+
+    Does NOT handle RECORDING/PAUSED — those are handled by Daily's idle
+    timeout which auto-stops the recording after 5 min, triggering
+    recording.ready-to-download → audio-merger.
+    """
+    session: Session | None = session_repo.get_by_id(session_id)
+    if session is None:
+        logger.warning("Webhook meeting.ended: session not found: %s", session_id)
+        return
+
+    logger.info(
+        "Webhook meeting.ended: session=%s status=%s count=%d",
+        session_id, session.status.value, session.participant_count,
+    )
+
+    if session.participant_count > 0:
         logger.info(
-            "Webhook: all participants left, recording never started — session=%s status=%s",
-            session_id, updated.status.value,
+            "Webhook meeting.ended: participants still present (count=%d) — "
+            "session=%s — ignoring (likely reconnect after refresh)",
+            session.participant_count, session_id,
+        )
+        return
+
+    if session.status in (
+        SessionStatus.CREATED,
+        SessionStatus.WAITING_FOR_GUEST,
+        SessionStatus.READY,
+    ):
+        logger.info(
+            "Webhook meeting.ended: no participants, recording never started — "
+            "session=%s status=%s → error",
+            session_id, session.status.value,
         )
         session_repo.update_status(
             session_id, SessionStatus.ERROR,
-            error_message="Room expired — recording was never started",
+            error_message="Meeting ended — recording was never started",
         )
+        return
+
+    logger.info(
+        "Webhook meeting.ended: session=%s status=%s — no action needed",
+        session_id, session.status.value,
+    )
 
 
 async def on_recording_ready_to_download(
@@ -509,10 +581,14 @@ async def on_recording_ready_to_download(
 
     Fires ONCE per session (one continuous recording — pause/resume are logical,
     Daily recording runs from Start to End Session without interruption).
-    This fires when Daily.co finishes uploading raw tracks to S3 after stop_recording.
+    This fires when:
+      - Host clicks End Session → stop_recording → Daily finalizes → this webhook
+      - All participants leave → idle timeout (5 min) → Daily auto-stops → this webhook
+      - Room expires with eject_at_room_exp → Daily auto-stops → this webhook
 
-    1. Stores s3_key in DynamoDB for reference.
-    2. Invokes audio-merger Lambda asynchronously with {session_id, domain}.
+    1. Transitions RECORDING/PAUSED → PROCESSING (cleanup for idle timeout case).
+    2. Stores s3_key in DynamoDB for reference.
+    3. Invokes audio-merger Lambda asynchronously with {session_id, domain}.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
@@ -521,10 +597,23 @@ async def on_recording_ready_to_download(
         )
         return
 
+    # If session is still in RECORDING/PAUSED (idle timeout auto-stopped the recording),
+    # transition to PROCESSING so the status flow is clean.
+    if session.status in (SessionStatus.RECORDING, SessionStatus.PAUSED):
+        logger.info(
+            "Webhook: recording.ready-to-download — session=%s still in %s, "
+            "transitioning to processing (idle timeout auto-stop)",
+            session_id, session.status.value,
+        )
+        session_repo.update_status(
+            session_id, SessionStatus.PROCESSING,
+            recording_stopped_at=now_iso(),
+        )
+
     # Store s3_key if present (useful for debugging / reference)
     if s3_key:
         session_repo.update_status(
-            session_id, session.status, s3_key=s3_key,
+            session_id, SessionStatus.PROCESSING, s3_key=s3_key,
         )
         logger.info(
             "Webhook: recording.ready-to-download — stored s3_key for session=%s recording=%s",
@@ -578,10 +667,6 @@ def on_recording_error(session_id: str, error_msg: str) -> None:
 
     This is the ONLY way to know about server-side recording failures.
     All recording errors are terminal → mark session as error.
-
-    Note: maxDuration is NOT set on recordings — room expiry (eject_at_room_exp)
-    is the single expiry mechanism. Room expiry auto-stops any active recording
-    and triggers recording.ready-to-download (not recording.error).
     """
     logger.error(
         "Recording error: session=%s error=%s", session_id, error_msg,

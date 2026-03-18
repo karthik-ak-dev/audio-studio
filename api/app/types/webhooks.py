@@ -27,6 +27,14 @@ class ParticipantPayload(BaseModel):
     duration: Optional[float] = None
 
 
+# ─── Meeting event payloads ──────────────────────
+
+class MeetingEndedPayload(BaseModel):
+    """Payload for meeting.ended webhook."""
+
+    room: str = ""
+
+
 # ─── Recording event payloads ─────────────────────
 
 class RecordingReadyPayload(BaseModel):

@@ -19,7 +19,7 @@ class SessionStatus(StrEnum):
 # Daily.co room configuration
 MAX_PARTICIPANTS: int = 2
 ROOM_EXPIRY_SEC: int = 7200  # 2 hours — room + recording expire together
-MIN_IDLE_TIMEOUT_SEC: int = 600
+MIN_IDLE_TIMEOUT_SEC: int = 300  # 5 minutes — Daily auto-stops recording after this idle period
 SFU_SWITCHOVER: float = 0.5
 
 # Audio permissions
