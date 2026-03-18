@@ -11,14 +11,27 @@ from processor.constants import AUDIO_TRACK_IDENTIFIER
 logger: logging.Logger = logging.getLogger(__name__)
 s3 = boto3.client("s3")
 
-# Extract the trackTimestamp from the end of an S3 key:
+# S3 key format from Daily.co raw-tracks:
 #   {domain}/session-{id}/{recordingTs}-{connId}-cam-audio-{trackTs}
+# Both timestamps are Unix epoch in milliseconds.
 _TRACK_TS_RE: re.Pattern[str] = re.compile(r"cam-audio-(\d+)$")
+_RECORDING_TS_RE: re.Pattern[str] = re.compile(r"/(\d+)-[0-9a-f]{8}-")
 
 
 def track_timestamp(s3_key: str) -> int:
     """Extract trackTimestamp (ms since epoch) from S3 key for sorting."""
     match = _TRACK_TS_RE.search(s3_key)
+    return int(match.group(1)) if match else 0
+
+
+def recording_timestamp(s3_key: str) -> int:
+    """Extract recordingTimestamp (ms since epoch) from S3 key.
+
+    This is the same across all tracks in one recording session.
+    Used with track_timestamp to calculate absolute offset:
+        offset_ms = track_timestamp(key) - recording_timestamp(key)
+    """
+    match = _RECORDING_TS_RE.search(s3_key)
     return int(match.group(1)) if match else 0
 
 

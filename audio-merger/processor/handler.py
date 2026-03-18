@@ -20,6 +20,7 @@ from processor.s3_client import (
     upload_file,
     processed_exists,
     track_timestamp,
+    recording_timestamp,
 )
 from processor.merger import merge_tracks, concat_and_convert
 from processor.session_store import get_session, update_status
@@ -134,18 +135,24 @@ def _process_session(  # pylint: disable=too-many-locals
 ) -> None:
     """Download all tracks, group by participant, concat+convert, merge, upload.
 
-    Pipeline per participant (single ffmpeg pass):
-      WebM segments → [decode + concat + convert] → one WAV per participant
+    Time alignment uses Daily.co's recommended approach:
+      offset_ms = trackTs - recordingTs (absolute position from recording start)
 
-    When a participant has multiple segments (e.g. disconnect/reconnect),
-    gaps between segments are filled with silence to preserve time alignment.
+    Each participant's segments are placed at their absolute positions using
+    ffmpeg's adelay filter. Gaps from disconnect/reconnect become silence naturally.
+    No ffprobe duration probing needed (avoids WebM/Opus duration metadata issue).
 
-    Then merge participant WAVs into combined.wav.
+    Since each participant's WAV has timing baked in from recording start,
+    the final merge is a simple amix with no additional delay offsets.
     """
     temp_files: list[str] = []
     logger.info("session=%s Processing started: %d tracks", session_id, len(track_keys))
 
     try:
+        # Get the recording start timestamp (same for all tracks in this recording)
+        rec_ts = recording_timestamp(track_keys[0])
+        logger.info("session=%s Recording start timestamp: %d", session_id, rec_ts)
+
         # Group tracks by participant
         groups = _group_tracks_by_participant(session_id, track_keys, participant_map)
         logger.info(
@@ -155,18 +162,12 @@ def _process_session(  # pylint: disable=too-many-locals
         )
 
         participant_wavs: list[str] = []
-        # Track the earliest trackTimestamp per participant for time alignment
-        participant_start_ts: list[int] = []
 
         for group_name, group_keys in sorted(groups.items()):
             logger.info(
                 "session=%s Processing participant: %s (%d segments)",
                 session_id, group_name, len(group_keys),
             )
-
-            # Record earliest trackTimestamp for this participant
-            earliest_ts = track_timestamp(group_keys[0])
-            participant_start_ts.append(earliest_ts)
 
             # Download all raw segments for this participant
             local_segments: list[str] = []
@@ -181,36 +182,35 @@ def _process_session(  # pylint: disable=too-many-locals
                 session_id, len(local_segments), group_name,
             )
 
-            # Get trackTimestamps for each segment (for gap-aware concatenation)
-            segment_timestamps = [track_timestamp(key) for key in group_keys]
+            # Calculate absolute offset from recording start for each segment
+            # offset_ms = trackTs - recordingTs (Daily.co's recommended approach)
+            segment_offsets = [track_timestamp(key) - rec_ts for key in group_keys]
+            logger.info(
+                "session=%s Segment offsets for %s: %s (ms from recording start)",
+                session_id, group_name,
+                [f"seg{i}={ofs}ms ({ofs/1000:.1f}s)" for i, ofs in enumerate(segment_offsets)],
+            )
 
-            # Single ffmpeg pass: decode + concat + convert → one WAV
-            # When multiple segments exist, silence is inserted for gaps
-            # (e.g. participant disconnected and reconnected)
+            # Convert and merge segments using absolute offsets.
+            # ffmpeg adelay filter places each segment at its correct position.
+            # Gaps from disconnect/reconnect become silence naturally.
             output_wav = f"/tmp/{group_name}.wav"
-            silence_temps = concat_and_convert(
+            concat_and_convert(
                 session_id, local_segments, output_wav,
-                track_timestamps_ms=segment_timestamps,
+                offset_ms=segment_offsets,
             )
             participant_wavs.append(output_wav)
             temp_files.append(output_wav)
-            temp_files.extend(silence_temps)
 
-        # Calculate delay offsets (ms) relative to the earliest participant
-        global_start = min(participant_start_ts) if participant_start_ts else 0
-        delay_ms = [ts - global_start for ts in participant_start_ts]
-        logger.info(
-            "session=%s Time alignment — start_ts=%s global_start=%d delays_ms=%s",
-            session_id, participant_start_ts, global_start, delay_ms,
-        )
-
-        # Merge all participants into combined (with time alignment)
+        # Merge all participants into combined.
+        # No delay_ms needed — each participant's WAV already has correct
+        # absolute timing from recording start (silence-padded by adelay).
         combined_path = "/tmp/combined.wav"
         logger.info(
             "session=%s Merging %d participant WAVs into combined.wav",
             session_id, len(participant_wavs),
         )
-        merge_tracks(session_id, participant_wavs, combined_path, delay_ms=delay_ms)
+        merge_tracks(session_id, participant_wavs, combined_path)
         temp_files.append(combined_path)
 
         # Upload: individual participant files + combined
