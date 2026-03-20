@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card } from "@/components/ui/Card";
@@ -18,6 +18,7 @@ const statusBadgeVariant: Record<SessionStatus, "accent" | "warning" | "error" |
   paused: "warning",
   processing: "warning",
   completed: "accent",
+  cancelled: "error",
   error: "error",
 };
 
@@ -29,13 +30,24 @@ const statusLabel: Record<SessionStatus, string> = {
   paused: "Paused",
   processing: "Processing",
   completed: "Completed",
+  cancelled: "Cancelled",
   error: "Error",
 };
 
+const CANCEL_REASONS = [
+  "Not satisfied with audio quality",
+  "Recording had technical issues",
+  "Wrong session / test recording",
+  "Other",
+] as const;
+
 export function SessionComplete() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const { pollSession, getSession, error } = useSessionApi();
+  const { pollSession, getSession, cancelSession, error } = useSessionApi();
   const [session, setSession] = useState<Session | null>(null);
+  const [showCancelForm, setShowCancelForm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -52,7 +64,7 @@ export function SessionComplete() {
       const result = await pollSession(sessionId);
       if (result) {
         setSession(result);
-        if (result.status === "completed" || result.status === "error") {
+        if (result.status === "completed" || result.status === "cancelled" || result.status === "error") {
           clearInterval(interval);
         }
       }
@@ -60,6 +72,19 @@ export function SessionComplete() {
 
     return () => clearInterval(interval);
   }, [sessionId, getSession, pollSession]);
+
+  const handleCancel = useCallback(async () => {
+    if (!sessionId || !cancelReason.trim()) return;
+    setCancelling(true);
+    const result = await cancelSession(sessionId, cancelReason.trim());
+    setCancelling(false);
+    if (result === true) {
+      // Re-fetch to get updated status
+      const updated = await getSession(sessionId);
+      if (updated) setSession(updated);
+      setShowCancelForm(false);
+    }
+  }, [sessionId, cancelReason, cancelSession, getSession]);
 
   if (error) {
     return (
@@ -79,6 +104,7 @@ export function SessionComplete() {
 
   const isProcessing = session.status === "processing";
   const isCompleted = session.status === "completed";
+  const isCancelled = session.status === "cancelled";
   const isError = session.status === "error";
 
   // Build participant names from roster
@@ -92,7 +118,7 @@ export function SessionComplete() {
           <div className={`mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl ring-1 ${
             isCompleted
               ? "bg-accent/10 ring-accent/20"
-              : isError
+              : isError || isCancelled
                 ? "bg-red-500/10 ring-red-500/20"
                 : "bg-accent/10 ring-accent/20"
           }`}>
@@ -101,7 +127,7 @@ export function SessionComplete() {
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                 <polyline points="22 4 12 14.01 9 11.01" />
               </svg>
-            ) : isError ? (
+            ) : isError || isCancelled ? (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7 text-red-400">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="15" x2="9" y1="9" y2="15" />
@@ -117,8 +143,8 @@ export function SessionComplete() {
           </div>
           <h1 className="text-3xl font-black tracking-tight text-text md:text-4xl">
             Session{" "}
-            <span className={isError ? "text-red-400" : "text-gradient-accent"}>
-              {isCompleted ? "Complete" : isError ? "Failed" : "Processing"}
+            <span className={isError || isCancelled ? "text-red-400" : "text-gradient-accent"}>
+              {isCompleted ? "Complete" : isCancelled ? "Cancelled" : isError ? "Failed" : "Processing"}
             </span>
           </h1>
           {isProcessing && (
@@ -190,15 +216,93 @@ export function SessionComplete() {
               </div>
             )}
 
-            {/* Completed — show S3 info */}
+            {/* Completed — audio playback + cancel option */}
             {isCompleted && (
-              <div className="rounded-md bg-accent/[0.06] px-4 py-4 ring-1 ring-accent/10">
-                <div className="flex items-center gap-2">
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-accent">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm font-medium text-accent">Audio files ready</span>
+              <div className="space-y-3">
+                <div className="rounded-md bg-accent/[0.06] px-4 py-4 ring-1 ring-accent/10">
+                  <div className="flex items-center gap-2">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-accent">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-sm font-medium text-accent">Audio files ready</span>
+                  </div>
                 </div>
+
+                {/* Combined audio player */}
+                {session.combined_audio_presigned_url && (
+                  <AudioTrack label="Combined" url={session.combined_audio_presigned_url} />
+                )}
+
+                {/* Individual track players */}
+                {session.host_audio_presigned_url && (
+                  <AudioTrack label={`Host — ${session.host_name}`} url={session.host_audio_presigned_url} />
+                )}
+                {session.guest_audio_presigned_url && (
+                  <AudioTrack label={`Guest — ${session.guest_name}`} url={session.guest_audio_presigned_url} />
+                )}
+
+                {/* Cancel session CTA */}
+                {!showCancelForm ? (
+                  <button
+                    onClick={() => setShowCancelForm(true)}
+                    className="w-full text-center text-xs text-text-muted hover:text-red-400 transition-colors py-2"
+                  >
+                    Not satisfied with the quality? Cancel this session
+                  </button>
+                ) : (
+                  <div className="rounded-md bg-red-500/[0.06] px-4 py-4 ring-1 ring-red-500/20 space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+                      Cancel Session
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {CANCEL_REASONS.map((reason) => (
+                        <button
+                          key={reason}
+                          onClick={() => setCancelReason(reason)}
+                          className={`rounded-full px-3 py-1.5 text-xs ring-1 transition-colors ${
+                            cancelReason === reason
+                              ? "bg-red-500/20 text-red-400 ring-red-500/40"
+                              : "bg-white/[0.03] text-text-muted ring-white/[0.06] hover:ring-white/[0.12]"
+                          }`}
+                        >
+                          {reason}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => {
+                          setShowCancelForm(false);
+                          setCancelReason("");
+                        }}
+                      >
+                        Back
+                      </Button>
+                      <button
+                        onClick={handleCancel}
+                        disabled={!cancelReason.trim() || cancelling}
+                        className="flex-1 rounded-lg bg-red-500/20 px-4 py-2 text-sm font-medium text-red-400 ring-1 ring-red-500/30 transition-colors hover:bg-red-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {cancelling ? "Cancelling..." : "Confirm Cancel"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Cancelled state */}
+            {isCancelled && (
+              <div className="flex items-start gap-3 rounded-md bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="mt-0.5 h-4 w-4 shrink-0 text-red-400">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                </svg>
+                <span className="text-sm text-red-400">
+                  {session.cancellation_reason ?? "Session was cancelled"}
+                </span>
               </div>
             )}
 
@@ -238,6 +342,28 @@ function DetailRow({ label, value }: { label: string; value: string }) {
         {label}
       </span>
       <span className="text-xs text-text">{value}</span>
+    </div>
+  );
+}
+
+function AudioTrack({ label, url }: { label: string; url: string }) {
+  return (
+    <div className="rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+          {label}
+        </span>
+        <a
+          href={url}
+          download
+          className="text-[10px] font-medium text-accent hover:text-accent/80 transition-colors"
+        >
+          Download
+        </a>
+      </div>
+      <audio controls preload="metadata" className="w-full h-8" style={{ colorScheme: "dark" }}>
+        <source src={url} type="audio/wav" />
+      </audio>
     </div>
   );
 }

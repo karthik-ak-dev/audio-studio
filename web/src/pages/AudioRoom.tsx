@@ -21,7 +21,7 @@ import { SESSION_POLL_INTERVAL_MS } from "@/config/constants";
 import type { DailySdkEvent } from "@/types/daily";
 
 const STORAGE_PREFIX = "audio-studio:";
-const TERMINAL_STATUSES = new Set(["processing", "completed", "error"]);
+const TERMINAL_STATUSES = new Set(["processing", "completed", "cancelled", "error"]);
 const POLL_FAIL_THRESHOLD = 3;
 
 export function AudioRoom() {

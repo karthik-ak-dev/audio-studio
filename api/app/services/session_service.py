@@ -18,7 +18,7 @@ Key design decisions (see ARCHITECTURE.md):
   - No sendBeacon — webhooks handle all involuntary disconnects.
 
 Session lifecycle:
-  created → waiting_for_guest → ready → recording ⇄ paused → processing → completed
+  created → waiting_for_guest → ready → recording ⇄ paused → processing → completed → cancelled
                                                               ↘ error (terminal)
 """
 
@@ -35,6 +35,7 @@ from app.constants import SessionStatus, SESSION_ID_LENGTH
 from app.models.session import Session
 from app.repos import session_repo
 from app.services.daily_client import daily_client
+from app.services.s3_client import generate_presigned_url
 from app.types.requests import CreateSessionRequest, JoinRequest, LeaveRequest
 from app.types.responses import (
     CreateSessionResponse,
@@ -300,6 +301,32 @@ async def end_session(session_id: str) -> SessionActionResponse:
 
     logger.info("Session ended: session=%s -> processing", session_id)
     return SessionActionResponse(session_id=session_id, status=SessionStatus.PROCESSING)
+
+
+async def cancel_session(session_id: str, reason: str) -> SessionActionResponse:
+    """Cancel a completed session — marks quality as unsatisfactory.
+
+    Only valid transition: completed → cancelled.
+    Stores the cancellation reason for downstream visibility.
+    """
+    session: Session | None = session_repo.get_by_id(session_id)
+    if session is None:
+        raise SessionNotFoundError(session_id)
+
+    if session.status != SessionStatus.COMPLETED:
+        raise InvalidSessionStateError(session_id, session.status, "cancel session")
+
+    success: bool = session_repo.conditional_update_status(
+        session_id=session_id,
+        new_status=SessionStatus.CANCELLED,
+        required_status=SessionStatus.COMPLETED,
+        cancellation_reason=reason,
+    )
+    if not success:
+        raise InvalidSessionStateError(session_id, session.status, "cancel session")
+
+    logger.info("Session cancelled: session=%s reason=%s", session_id, reason)
+    return SessionActionResponse(session_id=session_id, status=SessionStatus.CANCELLED)
 
 
 async def leave_session(session_id: str, req: LeaveRequest) -> SessionActionResponse:
@@ -680,7 +707,6 @@ def on_recording_error(session_id: str, error_msg: str) -> None:
 # Helpers
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-
 def _to_session_response(session: Session) -> SessionResponse:
     # Build rejoin URLs from persisted tokens
     host_rejoin_url: str | None = None
@@ -695,6 +721,15 @@ def _to_session_response(session: Session) -> SessionResponse:
             f"{settings.frontend_origin}/join/{session.session_id}"
             f"?t={session.guest_token}"
         )
+
+    # Generate presigned URLs only for completed sessions (when audio URLs exist)
+    host_audio_presigned: str | None = None
+    guest_audio_presigned: str | None = None
+    combined_audio_presigned: str | None = None
+    if session.status == SessionStatus.COMPLETED:
+        host_audio_presigned = generate_presigned_url(session.host_audio_url)
+        guest_audio_presigned = generate_presigned_url(session.guest_audio_url)
+        combined_audio_presigned = generate_presigned_url(session.combined_audio_url)
 
     return SessionResponse(
         session_id=session.session_id,
@@ -715,9 +750,13 @@ def _to_session_response(session: Session) -> SessionResponse:
         host_audio_url=session.host_audio_url,
         guest_audio_url=session.guest_audio_url,
         combined_audio_url=session.combined_audio_url,
+        host_audio_presigned_url=host_audio_presigned,
+        guest_audio_presigned_url=guest_audio_presigned,
+        combined_audio_presigned_url=combined_audio_presigned,
         host_rejoin_url=host_rejoin_url,
         guest_rejoin_url=guest_rejoin_url,
         error_message=session.error_message,
+        cancellation_reason=session.cancellation_reason,
         created_at=session.created_at,
         updated_at=session.updated_at,
         room_expires_at=session.room_expires_at,

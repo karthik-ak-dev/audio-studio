@@ -40,16 +40,22 @@ class SessionResponse(BaseModel):
     s3_key: Optional[str] = None
     s3_processed_prefix: Optional[str] = None
 
-    # Processed audio file URLs
+    # Processed audio file URLs (raw S3 URIs from DynamoDB)
     host_audio_url: Optional[str] = None
     guest_audio_url: Optional[str] = None
     combined_audio_url: Optional[str] = None
+
+    # Presigned HTTPS URLs for browser playback/download
+    host_audio_presigned_url: Optional[str] = None
+    guest_audio_presigned_url: Optional[str] = None
+    combined_audio_presigned_url: Optional[str] = None
 
     # Rejoin URLs (built from persisted tokens)
     host_rejoin_url: Optional[str] = None
     guest_rejoin_url: Optional[str] = None
 
     error_message: Optional[str] = None
+    cancellation_reason: Optional[str] = None
     created_at: str
     updated_at: str
     room_expires_at: Optional[str] = None

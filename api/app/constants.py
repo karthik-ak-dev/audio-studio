@@ -12,6 +12,7 @@ class SessionStatus(StrEnum):
     PAUSED = "paused"
     PROCESSING = "processing"
     COMPLETED = "completed"
+    CANCELLED = "cancelled"
     ERROR = "error"
 
 
@@ -29,3 +30,6 @@ GUEST_ADMIN_PERMISSIONS: list[str] = []
 
 # DynamoDB
 SESSION_ID_LENGTH: int = 12
+
+# S3 presigned URLs — max for Lambda IAM role is ~12h; 6h is a safe default
+PRESIGNED_URL_EXPIRY_SEC: int = 6 * 60 * 60  # 6 hours

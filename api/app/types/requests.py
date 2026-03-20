@@ -22,3 +22,9 @@ class LeaveRequest(BaseModel):
     """FE sends when user explicitly clicks Leave."""
 
     user_id: str = Field(..., min_length=1, max_length=128)
+
+
+class CancelSessionRequest(BaseModel):
+    """Request body for POST /sessions/{id}/cancel."""
+
+    reason: str = Field(..., min_length=1, max_length=500)

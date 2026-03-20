@@ -6,6 +6,7 @@ export type SessionStatus =
   | "paused"
   | "processing"
   | "completed"
+  | "cancelled"
   | "error";
 
 export interface CreateSessionRequest {
@@ -44,11 +45,22 @@ export interface Session {
   s3_key: string | null;
   s3_processed_prefix: string | null;
 
+  // Processed audio file URLs (raw S3 URIs)
+  host_audio_url: string | null;
+  guest_audio_url: string | null;
+  combined_audio_url: string | null;
+
+  // Presigned HTTPS URLs for browser playback/download
+  host_audio_presigned_url: string | null;
+  guest_audio_presigned_url: string | null;
+  combined_audio_presigned_url: string | null;
+
   // Rejoin URLs
   host_rejoin_url: string | null;
   guest_rejoin_url: string | null;
 
   error_message: string | null;
+  cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
   room_expires_at: string | null;

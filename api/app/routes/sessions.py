@@ -15,6 +15,7 @@ Endpoints:
   POST /sessions/{session_id}/leave  → FE reports: participant left the room
   POST /sessions/{session_id}/start  → Host starts recording
   POST /sessions/{session_id}/end    → Host ends session → processing (TERMINAL)
+  POST /sessions/{session_id}/cancel → Cancel completed session (quality issue)
   POST /sessions/{session_id}/pause  → Host pauses recording
   POST /sessions/{session_id}/resume → Host resumes recording (new segment)
   GET  /sessions/user/{host_user_id} → List sessions for a host
@@ -24,7 +25,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from app.types.requests import CreateSessionRequest, JoinRequest, LeaveRequest
+from app.types.requests import CreateSessionRequest, JoinRequest, LeaveRequest, CancelSessionRequest
 from app.types.responses import (
     CreateSessionResponse,
     SessionActionResponse,
@@ -110,6 +111,18 @@ async def end_session(session_id: str) -> SessionActionResponse:
         raise HTTPException(status_code=404, detail="Session not found") from exc
     except InvalidSessionStateError as exc:
         logger.warning("End session rejected: session=%s — %s", session_id, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{session_id}/cancel", response_model=SessionActionResponse)
+async def cancel_session(session_id: str, req: CancelSessionRequest) -> SessionActionResponse:
+    """Cancel a completed session due to quality issues."""
+    try:
+        return await session_service.cancel_session(session_id, req.reason)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    except InvalidSessionStateError as exc:
+        logger.warning("Cancel rejected: session=%s — %s", session_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

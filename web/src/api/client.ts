@@ -100,6 +100,13 @@ export const api = {
       method: "POST",
     });
   },
+
+  cancelSession(sessionId: string, body: { reason: string }): Promise<SessionActionResponse> {
+    return request<SessionActionResponse>(`/sessions/${sessionId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 } as const;
 
 export { ApiError };

@@ -57,6 +57,7 @@ class Session:  # pylint: disable=too-many-instance-attributes
     guest_audio_url: Optional[str] = None
     combined_audio_url: Optional[str] = None
     error_message: Optional[str] = None
+    cancellation_reason: Optional[str] = None
 
     # Timestamp
     created_at: str = ""
@@ -119,6 +120,8 @@ class Session:  # pylint: disable=too-many-instance-attributes
             item["combined_audio_url"] = self.combined_audio_url
         if self.error_message is not None:
             item["error_message"] = self.error_message
+        if self.cancellation_reason is not None:
+            item["cancellation_reason"] = self.cancellation_reason
         return item
 
     @classmethod
@@ -171,6 +174,7 @@ class Session:  # pylint: disable=too-many-instance-attributes
             guest_audio_url=_opt_str(item, "guest_audio_url"),
             combined_audio_url=_opt_str(item, "combined_audio_url"),
             error_message=_opt_str(item, "error_message"),
+            cancellation_reason=_opt_str(item, "cancellation_reason"),
             created_at=str(item.get("created_at", "")),
             updated_at=str(item.get("updated_at", "")),
             room_expires_at=_opt_str(item, "room_expires_at"),

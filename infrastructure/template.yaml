@@ -242,6 +242,8 @@ Resources:
             TableName: !Ref SessionsTable
         - LambdaInvokePolicy:
             FunctionName: !Ref AudioMergerFn
+        - S3ReadPolicy:
+            BucketName: !Ref RecordingsBucket
 
   # ─── Lambda: Audio Merger (zip deploy, static ffmpeg in bin/) ─────
   AudioMergerFn:
