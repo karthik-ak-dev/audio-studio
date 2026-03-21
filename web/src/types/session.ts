@@ -13,6 +13,8 @@ export interface CreateSessionRequest {
   host_user_id: string;
   host_name: string;
   guest_name: string;
+  guest_user_id?: string;
+  topic_id?: string;
 }
 
 export interface CreateSessionResponse {
@@ -29,6 +31,9 @@ export interface Session {
   host_user_id: string;
   host_name: string;
   guest_name: string;
+  guest_user_id: string | null;
+  topic_id: string | null;
+  topic_name: string | null;
   daily_room_url: string | null;
 
   // Server-driven participant tracking

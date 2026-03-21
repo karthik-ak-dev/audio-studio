@@ -8,7 +8,7 @@
 version = 0.1
 
 [default.deploy.parameters]
-stack_name = "audio-studio-dev"
+stack_name = "dev-recstudio"
 region = "ap-south-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
@@ -30,7 +30,7 @@ parameter_overrides = [
 use_container = false
 
 [stage.deploy.parameters]
-stack_name = "audio-studio-stage"
+stack_name = "stage-recstudio"
 region = "ap-south-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
@@ -39,11 +39,10 @@ confirm_changeset = true
 parameter_overrides = [
   "Environment=stage",
   "DailyDomain=stage-kgen",
-  "FrontendDomain=stage-studio.kgen.io",
-  "FrontendOrigin=https://stage-studio.kgen.io",
+  "FrontendDomain=stage-recstudio.humynlabs.ai",
+  "FrontendOrigin=https://stage-recstudio.humynlabs.ai",
 ]
 
-# FrontendOrigin — set to your Cloudflare domain
 # Secrets — pass at deploy time:
 #   sam deploy --config-env stage --parameter-overrides \
 #     DailyApiKey=xxx DailyWebhookSecret=xxx
@@ -52,7 +51,7 @@ parameter_overrides = [
 use_container = false
 
 [prod.deploy.parameters]
-stack_name = "audio-studio-prod"
+stack_name = "prod-recstudio"
 region = "ap-south-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
@@ -61,8 +60,8 @@ confirm_changeset = true
 parameter_overrides = [
   "Environment=prod",
   "DailyDomain=ak-kgen",
-  "FrontendDomain=studio.kgen.io",
-  "FrontendOrigin=https://studio.kgen.io",
+  "FrontendDomain=recstudio.humynlabs.ai",
+  "FrontendOrigin=https://recstudio.humynlabs.ai",
 ]
 
 [prod.build.parameters]

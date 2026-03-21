@@ -260,3 +260,29 @@ def get_by_host(host_user_id: str, limit: int = 20) -> list[Session]:
     )
     items: list[dict] = response.get("Items", [])
     return [Session.from_dynamo_item(item) for item in items]
+
+
+def get_by_guest(guest_user_id: str, limit: int = 20) -> list[Session]:
+    """Query sessions by guest_user_id using the GuestUserIndex GSI."""
+    response = table.query(
+        IndexName="GuestUserIndex",
+        KeyConditionExpression="guest_user_id = :uid",
+        ExpressionAttributeValues={":uid": guest_user_id},
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    items: list[dict] = response.get("Items", [])
+    return [Session.from_dynamo_item(item) for item in items]
+
+
+def get_by_topic(topic_id: str, limit: int = 50) -> list[Session]:
+    """Query sessions by topic_id using the TopicIndex GSI."""
+    response = table.query(
+        IndexName="TopicIndex",
+        KeyConditionExpression="topic_id = :tid",
+        ExpressionAttributeValues={":tid": topic_id},
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    items: list[dict] = response.get("Items", [])
+    return [Session.from_dynamo_item(item) for item in items]

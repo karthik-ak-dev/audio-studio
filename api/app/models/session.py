@@ -31,6 +31,11 @@ class Session:  # pylint: disable=too-many-instance-attributes
     daily_room_url: str
     status: SessionStatus
 
+    # Optional identity/topic fields
+    guest_user_id: Optional[str] = None
+    topic_id: Optional[str] = None
+    topic_name: Optional[str] = None
+
     # Participant tracking (4 fields — see module docstring)
     active_participants: set[str] = field(default_factory=set)
     participant_connections: dict[str, str] = field(default_factory=dict)
@@ -84,6 +89,14 @@ class Session:  # pylint: disable=too-many-instance-attributes
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+        # Optional identity/topic fields
+        if self.guest_user_id is not None:
+            item["guest_user_id"] = self.guest_user_id
+        if self.topic_id is not None:
+            item["topic_id"] = self.topic_id
+        if self.topic_name is not None:
+            item["topic_name"] = self.topic_name
 
         if self.room_expires_at is not None:
             item["room_expires_at"] = self.room_expires_at
@@ -154,6 +167,9 @@ class Session:  # pylint: disable=too-many-instance-attributes
             host_user_id=str(item["host_user_id"]),
             host_name=str(item["host_name"]),
             guest_name=str(item["guest_name"]),
+            guest_user_id=_opt_str(item, "guest_user_id"),
+            topic_id=_opt_str(item, "topic_id"),
+            topic_name=_opt_str(item, "topic_name"),
             daily_room_name=str(item["daily_room_name"]),
             daily_room_url=str(item["daily_room_url"]),
             status=SessionStatus(str(item["status"])),

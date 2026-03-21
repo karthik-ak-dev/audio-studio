@@ -306,15 +306,29 @@ export function SessionComplete() {
               </div>
             )}
 
+            {/* Topic */}
+            {session.topic_name && (
+              <DetailRow label="Topic" value={session.topic_name} />
+            )}
+
             {/* Session ID */}
             <DetailRow label="Session ID" value={session.session_id} />
 
-            {/* New session button */}
-            <Link to="/" className="w-full">
-              <Button variant="secondary" size="md" className="w-full">
-                New Session
-              </Button>
-            </Link>
+            {/* Navigation buttons */}
+            <div className="flex flex-col gap-2">
+              <Link to="/dashboard" className="w-full">
+                <Button variant="secondary" size="md" className="w-full">
+                  Back to Dashboard
+                </Button>
+              </Link>
+              {session.topic_id && (
+                <Link to={`/session/new?topic_id=${session.topic_id}`} className="w-full">
+                  <Button variant="ghost" size="md" className="w-full">
+                    + Record another session for this topic
+                  </Button>
+                </Link>
+              )}
+            </div>
           </div>
         </Card>
       </div>

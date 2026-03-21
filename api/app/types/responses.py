@@ -21,6 +21,9 @@ class SessionResponse(BaseModel):
     host_user_id: str
     host_name: str
     guest_name: str
+    guest_user_id: Optional[str] = None
+    topic_id: Optional[str] = None
+    topic_name: Optional[str] = None
     daily_room_url: Optional[str] = None
 
     # Participant tracking — derived from DynamoDB fields
@@ -69,4 +72,19 @@ class SessionActionResponse(BaseModel):
 
 class SessionListResponse(BaseModel):
     """Paginated list of sessions for a host."""
+    sessions: list[SessionResponse]
+
+
+class TopicResponse(BaseModel):
+    """Single topic returned by API."""
+    topic_id: str
+    host_user_id: str
+    topic_name: str
+    created_at: str
+    updated_at: str
+
+
+class TopicWithSessionsResponse(BaseModel):
+    """Topic with all its sessions — used for shared topic view."""
+    topic: TopicResponse
     sessions: list[SessionResponse]

@@ -5,6 +5,11 @@ import type {
   Session,
   SessionActionResponse,
 } from "@/types/session";
+import type {
+  Topic,
+  CreateTopicRequest,
+  TopicWithSessions,
+} from "@/types/topic";
 
 class ApiError extends Error {
   constructor(
@@ -106,6 +111,37 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     });
+  },
+
+  getUserSessions(hostUserId: string, limit = 50): Promise<{ sessions: Session[] }> {
+    return request<{ sessions: Session[] }>(
+      `/sessions/user/${encodeURIComponent(hostUserId)}?limit=${limit}`,
+    );
+  },
+
+  getGuestSessions(guestUserId: string, limit = 20): Promise<{ sessions: Session[] }> {
+    return request<{ sessions: Session[] }>(
+      `/sessions/guest/${encodeURIComponent(guestUserId)}?limit=${limit}`,
+    );
+  },
+
+  // ─── Topics ─────────────────────────────────────
+
+  createTopic(data: CreateTopicRequest): Promise<Topic> {
+    return request<Topic>("/topics/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  getTopic(topicId: string): Promise<TopicWithSessions> {
+    return request<TopicWithSessions>(`/topics/${topicId}`);
+  },
+
+  getUserTopics(hostUserId: string, limit = 50): Promise<{ topics: Topic[] }> {
+    return request<{ topics: Topic[] }>(
+      `/topics/user/${encodeURIComponent(hostUserId)}?limit=${limit}`,
+    );
   },
 } as const;
 

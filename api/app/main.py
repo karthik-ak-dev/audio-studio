@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routes import sessions, webhooks
+from app.routes import sessions, topics, webhooks
 
 # ── Logging setup ─────────────────────────────────
 # Format: [LEVEL] [timestamp] [module] message
@@ -72,6 +72,7 @@ async def log_requests(request: Request, call_next) -> Response:
 
 
 app.include_router(sessions.router, prefix="/sessions", tags=["sessions"])
+app.include_router(topics.router, prefix="/topics", tags=["topics"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 
 

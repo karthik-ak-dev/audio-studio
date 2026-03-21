@@ -1,5 +1,7 @@
 """Inbound request body types — strict Pydantic validation."""
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -8,6 +10,14 @@ class CreateSessionRequest(BaseModel):
     host_user_id: str = Field(..., min_length=1, max_length=128)
     host_name: str = Field(..., min_length=1, max_length=64)
     guest_name: str = Field(..., min_length=1, max_length=64)
+    guest_user_id: Optional[str] = Field(None, max_length=128)
+    topic_id: Optional[str] = Field(None, max_length=64)
+
+
+class CreateTopicRequest(BaseModel):
+    """Request body for POST /topics."""
+    host_user_id: str = Field(..., min_length=1, max_length=128)
+    topic_name: str = Field(..., min_length=1, max_length=128)
 
 
 class JoinRequest(BaseModel):

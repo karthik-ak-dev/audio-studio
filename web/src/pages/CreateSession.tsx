@@ -1,36 +1,84 @@
-import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, type FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
+import { api } from "@/api/client";
+import { getStoredEmail, getStoredName } from "@/pages/Landing";
+import type { Topic } from "@/types/topic";
 
-const STORAGE_PREFIX = "audio-studio:";
+const STORAGE_PREFIX = "recstudio:";
 
 export function CreateSession() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const dispatch = useSessionDispatch();
   const { loading, error, createSession, clearError } = useSessionApi();
 
-  const [hostName, setHostName] = useState<string>("");
-  const [guestName, setGuestName] = useState<string>("");
+  const userEmail = getStoredEmail();
+  const userName = getStoredName();
+
+  // Redirect to landing if no identity
+  useEffect(() => {
+    if (!userEmail || !userName) {
+      navigate("/", { replace: true });
+    }
+  }, [userEmail, userName, navigate]);
+
+  const [hostName, setHostName] = useState(userName ?? "");
+  const [guestName, setGuestName] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
+
+  // Topic selection
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [selectedTopicId, setSelectedTopicId] = useState<string>(
+    searchParams.get("topic_id") ?? "",
+  );
+  const [showNewTopic, setShowNewTopic] = useState(false);
+  const [newTopicName, setNewTopicName] = useState("");
+  const [topicLoading, setTopicLoading] = useState(false);
+
+  // Fetch user's topics on mount
+  useEffect(() => {
+    if (!userEmail) return;
+    api.getUserTopics(userEmail).then((res) => setTopics(res.topics)).catch(() => {});
+  }, [userEmail]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearError();
+    if (!userEmail) return;
 
-    const hostUserId = `host-${Date.now()}`;
+    let topicId: string | undefined = selectedTopicId || undefined;
+
+    // Create new topic if needed
+    if (showNewTopic && newTopicName.trim()) {
+      setTopicLoading(true);
+      try {
+        const topic = await api.createTopic({
+          host_user_id: userEmail,
+          topic_name: newTopicName.trim(),
+        });
+        topicId = topic.topic_id;
+      } catch {
+        return;
+      } finally {
+        setTopicLoading(false);
+      }
+    }
 
     const result = await createSession({
-      host_user_id: hostUserId,
+      host_user_id: userEmail,
       host_name: hostName.trim(),
       guest_name: guestName.trim(),
+      guest_user_id: guestEmail.trim().toLowerCase() || undefined,
+      topic_id: topicId,
     });
 
     if (result) {
-      // Store token in sessionStorage for refresh persistence
       sessionStorage.setItem(
         `${STORAGE_PREFIX}${result.session_id}`,
         JSON.stringify({
@@ -50,17 +98,29 @@ export function CreateSession() {
           guestJoinUrl: result.guest_join_url,
           hostName: hostName.trim(),
           guestName: guestName.trim(),
-          hostUserId,
+          hostUserId: userEmail,
         },
       });
       navigate(`/session/${result.session_id}`);
     }
   };
 
+  const handleTopicChange = (value: string) => {
+    if (value === "__new__") {
+      setShowNewTopic(true);
+      setSelectedTopicId("");
+    } else {
+      setShowNewTopic(false);
+      setNewTopicName("");
+      setSelectedTopicId(value);
+    }
+  };
+
+  if (!userEmail || !userName) return null;
+
   return (
     <PageContainer>
       <div className="mx-auto max-w-lg animate-slide-up">
-        {/* Hero section */}
         <div className="mb-10 text-center">
           <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 ring-1 ring-accent/20">
             <svg
@@ -101,6 +161,14 @@ export function CreateSession() {
               />
 
               <Input
+                label="Guest Email"
+                type="email"
+                placeholder="guest@example.com"
+                value={guestEmail}
+                onChange={(e) => setGuestEmail(e.target.value)}
+              />
+
+              <Input
                 label="Guest Name"
                 placeholder="Enter guest's name"
                 value={guestName}
@@ -108,6 +176,37 @@ export function CreateSession() {
                 required
                 maxLength={64}
               />
+
+              {/* Topic selection */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+                  Topic (optional)
+                </label>
+                <select
+                  value={showNewTopic ? "__new__" : selectedTopicId}
+                  onChange={(e) => handleTopicChange(e.target.value)}
+                  className="w-full rounded-md bg-white/[0.04] border border-border px-4 py-3 text-text outline-none transition-all duration-200 focus:border-accent/50 focus:ring-1 focus:ring-accent/20"
+                >
+                  <option value="">None</option>
+                  {topics.map((t) => (
+                    <option key={t.topic_id} value={t.topic_id}>
+                      {t.topic_name}
+                    </option>
+                  ))}
+                  <option value="__new__">+ Create new topic...</option>
+                </select>
+              </div>
+
+              {showNewTopic && (
+                <Input
+                  label="New Topic Name"
+                  placeholder="e.g. Ticket Booking"
+                  value={newTopicName}
+                  onChange={(e) => setNewTopicName(e.target.value)}
+                  required
+                  maxLength={128}
+                />
+              )}
             </div>
 
             {error && (
@@ -123,8 +222,8 @@ export function CreateSession() {
               type="submit"
               variant="primary"
               size="lg"
-              loading={loading}
-              disabled={!hostName.trim() || !guestName.trim()}
+              loading={loading || topicLoading}
+              disabled={!hostName.trim() || !guestName.trim() || (showNewTopic && !newTopicName.trim())}
               className="mt-1 w-full"
             >
               Create Session
@@ -132,7 +231,6 @@ export function CreateSession() {
           </form>
         </Card>
 
-        {/* Feature hints */}
         <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
           <div className="flex items-center gap-1.5 text-text-muted">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">

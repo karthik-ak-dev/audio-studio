@@ -162,3 +162,14 @@ async def list_user_sessions(
         host_user_id, limit=limit,
     )
     return {"sessions": sessions}
+
+
+@router.get("/guest/{guest_user_id}")
+async def list_guest_sessions(
+    guest_user_id: str, limit: int = 20,
+) -> dict[str, list[SessionResponse]]:
+    """List sessions where user was a guest, ordered by most recent first."""
+    sessions = await session_service.list_sessions_by_guest(
+        guest_user_id, limit=limit,
+    )
+    return {"sessions": sessions}

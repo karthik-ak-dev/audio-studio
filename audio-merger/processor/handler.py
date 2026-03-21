@@ -66,10 +66,11 @@ def _build_participant_map(
     """
     names: dict = session.get("participants", {})
     history: dict = session.get("connection_history", {})
+    host_user_id: str = session.get("host_user_id", "")
     result: dict[str, dict[str, str]] = {}
 
     for conn_id, user_id in history.items():
-        role = "host" if user_id.startswith("host-") else "guest"
+        role = "host" if user_id == host_user_id else "guest"
         name = names.get(user_id, role.capitalize())
         result[conn_id] = {"role": role, "name": name}
 

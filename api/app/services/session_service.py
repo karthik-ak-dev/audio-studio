@@ -60,11 +60,23 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     """Create a new session: Daily.co room + host/guest tokens + DynamoDB record."""
     session_id: str = _generate_session_id()
 
+    # If topic_id is provided, validate it exists and grab the name for denormalization
+    topic_name: str | None = None
+    if req.topic_id:
+        from app.repos import topic_repo
+        topic = topic_repo.get_by_id(req.topic_id)
+        if topic is None:
+            raise InvalidSessionStateError(session_id, SessionStatus.CREATED, "invalid topic_id")
+        topic_name = topic.topic_name
+
     room: dict[str, object] = await daily_client.create_room(session_id)
     room_name: str = str(room["name"])
     room_url: str = str(room["url"])
     room_config: dict[str, object] = room.get("config", {})  # type: ignore[assignment]
     room_expires_at: str = unix_to_iso(int(room_config["exp"]))
+
+    # Use guest_user_id from request if provided, otherwise fall back to generated ID
+    guest_user_id: str = req.guest_user_id if req.guest_user_id else f"guest-{session_id}"
 
     host_token: str = await daily_client.create_token(
         room_name=room_name,
@@ -74,7 +86,7 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     )
     guest_token: str = await daily_client.create_token(
         room_name=room_name,
-        user_id=f"guest-{session_id}",
+        user_id=guest_user_id,
         user_name=req.guest_name,
         is_owner=False,
     )
@@ -85,6 +97,9 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
         host_user_id=req.host_user_id,
         host_name=req.host_name,
         guest_name=req.guest_name,
+        guest_user_id=req.guest_user_id,
+        topic_id=req.topic_id,
+        topic_name=topic_name,
         daily_room_name=room_name,
         daily_room_url=room_url,
         status=SessionStatus.CREATED,
@@ -97,8 +112,8 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     session_repo.create(session)
 
     logger.info(
-        "Session created: id=%s room=%s host=%s",
-        session_id, room_name, req.host_user_id,
+        "Session created: id=%s room=%s host=%s topic=%s",
+        session_id, room_name, req.host_user_id, req.topic_id,
     )
 
     return CreateSessionResponse(
@@ -378,6 +393,12 @@ async def leave_session(session_id: str, req: LeaveRequest) -> SessionActionResp
 async def list_sessions_by_host(host_user_id: str, limit: int = 20) -> list[SessionResponse]:
     """List sessions for a given host user, ordered by most recent first."""
     sessions: list[Session] = session_repo.get_by_host(host_user_id, limit=limit)
+    return [_to_session_response(s) for s in sessions]
+
+
+async def list_sessions_by_guest(guest_user_id: str, limit: int = 20) -> list[SessionResponse]:
+    """List sessions where user was a guest, ordered by most recent first."""
+    sessions: list[Session] = session_repo.get_by_guest(guest_user_id, limit=limit)
     return [_to_session_response(s) for s in sessions]
 
 
@@ -737,6 +758,9 @@ def _to_session_response(session: Session) -> SessionResponse:
         host_user_id=session.host_user_id,
         host_name=session.host_name,
         guest_name=session.guest_name,
+        guest_user_id=session.guest_user_id,
+        topic_id=session.topic_id,
+        topic_name=session.topic_name,
         daily_room_url=session.daily_room_url,
         participant_count=session.participant_count,
         active_participants=sorted(session.active_participants),

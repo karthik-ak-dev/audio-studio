@@ -20,7 +20,7 @@ import { useSessionState, useSessionDispatch } from "@/context/SessionContext";
 import { SESSION_POLL_INTERVAL_MS } from "@/config/constants";
 import type { DailySdkEvent } from "@/types/daily";
 
-const STORAGE_PREFIX = "audio-studio:";
+const STORAGE_PREFIX = "recstudio:";
 const TERMINAL_STATUSES = new Set(["processing", "completed", "cancelled", "error"]);
 const POLL_FAIL_THRESHOLD = 3;
 
@@ -575,6 +575,9 @@ export function AudioRoom() {
                       Session Info
                     </span>
                     <div className="space-y-2">
+                      {sessionState.topicName && (
+                        <InfoRow label="Topic" value={sessionState.topicName} />
+                      )}
                       <InfoRow label="Session ID" value={sessionId ?? ""} mono />
                       {sessionState.hostName && (
                         <InfoRow label="Host" value={sessionState.hostName} />

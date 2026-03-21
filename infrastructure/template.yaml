@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Audio Studio — Unified Infrastructure
+  RecStudio — Unified Infrastructure
   S3, IAM, DynamoDB, API Gateway, API Lambda, Audio Merger Lambda
 
 # ──────────────────────────────────────────────
@@ -32,11 +32,11 @@ Parameters:
 
   FrontendDomain:
     Type: String
-    Description: "Frontend domain without protocol (e.g. studio.kgen.io) — S3 bucket named to match for CNAME routing"
+    Description: "Frontend domain without protocol (e.g. stage-recstudio.humynlabs.ai) — S3 bucket named to match for CNAME routing"
 
   FrontendOrigin:
     Type: String
-    Description: "Allowed CORS origin (e.g. https://studio.kgen.io)"
+    Description: "Allowed CORS origin (e.g. https://stage-recstudio.humynlabs.ai)"
 
   MergeDuration:
     Type: String
@@ -64,7 +64,7 @@ Resources:
   RecordingsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "audio-studio-recordings-${Environment}-${AWS::AccountId}"
+      BucketName: !Sub "${Environment}-recstudio-recordings-${AWS::AccountId}"
       VersioningConfiguration:
         Status: Enabled
       LifecycleConfiguration:
@@ -84,7 +84,7 @@ Resources:
   DailyRecordingsRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "audio-studio-daily-role-${Environment}"
+      RoleName: !Sub "${Environment}-recstudio-daily-role"
       MaxSessionDuration: 43200
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -165,7 +165,7 @@ Resources:
   SessionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "audio-studio-sessions-${Environment}"
+      TableName: !Sub "${Environment}-recstudio-sessions"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: session_id
@@ -175,6 +175,10 @@ Resources:
         - AttributeName: created_at
           AttributeType: S
         - AttributeName: host_user_id
+          AttributeType: S
+        - AttributeName: guest_user_id
+          AttributeType: S
+        - AttributeName: topic_id
           AttributeType: S
       KeySchema:
         - AttributeName: session_id
@@ -196,12 +200,57 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        - IndexName: GuestUserIndex
+          KeySchema:
+            - AttributeName: guest_user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: TopicIndex
+          KeySchema:
+            - AttributeName: topic_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ─── DynamoDB: Topics Table ─────────────────────
+  TopicsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${Environment}-recstudio-topics"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: topic_id
+          AttributeType: S
+        - AttributeName: host_user_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: topic_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: HostUserIndex
+          KeySchema:
+            - AttributeName: host_user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
 
   # ─── API Gateway: HTTP API ───────────────────
-  AudioStudioApi:
+  RecStudioApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: $default
@@ -216,7 +265,7 @@ Resources:
   ApiFn:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "audio-studio-api-${Environment}"
+      FunctionName: !Sub "${Environment}-recstudio-api"
       Handler: app.handler.handler
       CodeUri: ../api/
       Timeout: 30
@@ -224,6 +273,7 @@ Resources:
       Environment:
         Variables:
           SESSIONS_TABLE: !Ref SessionsTable
+          TOPICS_TABLE: !Ref TopicsTable
           RECORDINGS_BUCKET: !Ref RecordingsBucket
           DAILY_API_KEY: !Ref DailyApiKey
           DAILY_WEBHOOK_SECRET: !Ref DailyWebhookSecret
@@ -234,12 +284,14 @@ Resources:
         CatchAll:
           Type: HttpApi
           Properties:
-            ApiId: !Ref AudioStudioApi
+            ApiId: !Ref RecStudioApi
             Path: /{proxy+}
             Method: ANY
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TopicsTable
         - LambdaInvokePolicy:
             FunctionName: !Ref AudioMergerFn
         - S3ReadPolicy:
@@ -249,7 +301,7 @@ Resources:
   AudioMergerFn:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "audio-studio-merger-${Environment}"
+      FunctionName: !Sub "${Environment}-recstudio-merger"
       Handler: processor.handler.handler
       CodeUri: ../audio-merger/
       Timeout: 900
@@ -277,7 +329,7 @@ Outputs:
 
   ApiUrl:
     Description: API Gateway endpoint URL
-    Value: !Sub "https://${AudioStudioApi}.execute-api.${AWS::Region}.amazonaws.com"
+    Value: !Sub "https://${RecStudioApi}.execute-api.${AWS::Region}.amazonaws.com"
 
   FrontendWebsiteUrl:
     Description: S3 website endpoint (CNAME this in Cloudflare)
@@ -303,6 +355,10 @@ Outputs:
     Description: DynamoDB sessions table name
     Value: !Ref SessionsTable
 
+  TopicsTableName:
+    Description: DynamoDB topics table name
+    Value: !Ref TopicsTable
+
   ApiFunctionArn:
     Description: API Lambda function ARN
     Value: !GetAtt ApiFn.Arn
@@ -323,7 +379,7 @@ Outputs:
 
   # Get Output values
   # aws cloudformation describe-stacks \
-  #   --stack-name audio-studio-stage \
+  #   --stack-name stage-recstudio \
   #   --region ap-south-1 \
   #   --query "Stacks[0].Outputs" \
   #   --output table

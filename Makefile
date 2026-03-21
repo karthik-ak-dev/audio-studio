@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────
-# Audio Recording Platform — Makefile
+# RecStudio — Makefile
 # ──────────────────────────────────────────────
 
 .PHONY: help up down logs test lint clean ffmpeg deploy-stage deploy-stage-fe deploy-prod deploy-prod-fe
@@ -60,15 +60,15 @@ deploy-stage: ## Deploy backend to stage (DAILY_API_KEY=xxx [DAILY_WEBHOOK_SECRE
 		"DailyDomain=stage-kgen" \
 		"DailyApiKey=$(DAILY_API_KEY)" \
 		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)" \
-		"FrontendDomain=stage-studio.kgen.io" \
-		"FrontendOrigin=$(or $(FRONTEND_ORIGIN),https://stage-studio.kgen.io)"
+		"FrontendDomain=stage-recstudio.humynlabs.ai" \
+		"FrontendOrigin=$(or $(FRONTEND_ORIGIN),https://stage-recstudio.humynlabs.ai)"
 
 deploy-stage-fe: ## Deploy frontend to stage
 	@$(eval API_URL := $(shell aws cloudformation describe-stacks \
-		--stack-name audio-studio-stage --region ap-south-1 \
+		--stack-name stage-recstudio --region ap-south-1 \
 		--query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text))
 	@$(eval FE_BUCKET := $(shell aws cloudformation describe-stacks \
-		--stack-name audio-studio-stage --region ap-south-1 \
+		--stack-name stage-recstudio --region ap-south-1 \
 		--query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text))
 	cd web && VITE_API_BASE_URL=$(API_URL) npm run build
 	aws s3 sync web/dist/ s3://$(FE_BUCKET)/ --delete
@@ -89,15 +89,15 @@ deploy-prod: ## Deploy backend to prod (DAILY_API_KEY=xxx [DAILY_WEBHOOK_SECRET=
 		"DailyDomain=ak-kgen" \
 		"DailyApiKey=$(DAILY_API_KEY)" \
 		"DailyWebhookSecret=$(or $(DAILY_WEBHOOK_SECRET),none)" \
-		"FrontendDomain=studio.kgen.io" \
-		"FrontendOrigin=$(or $(FRONTEND_ORIGIN),https://studio.kgen.io)"
+		"FrontendDomain=recstudio.humynlabs.ai" \
+		"FrontendOrigin=$(or $(FRONTEND_ORIGIN),https://recstudio.humynlabs.ai)"
 
 deploy-prod-fe: ## Deploy frontend to prod
 	@$(eval API_URL := $(shell aws cloudformation describe-stacks \
-		--stack-name audio-studio-prod --region ap-south-1 \
+		--stack-name prod-recstudio --region ap-south-1 \
 		--query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text))
 	@$(eval FE_BUCKET := $(shell aws cloudformation describe-stacks \
-		--stack-name audio-studio-prod --region ap-south-1 \
+		--stack-name prod-recstudio --region ap-south-1 \
 		--query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text))
 	cd web && VITE_API_BASE_URL=$(API_URL) npm run build
 	aws s3 sync web/dist/ s3://$(FE_BUCKET)/ --delete

@@ -8,7 +8,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
 
-const STORAGE_PREFIX = "audio-studio:";
+const STORAGE_PREFIX = "recstudio:";
 const TERMINAL_STATUSES = new Set(["processing", "completed", "error"]);
 
 export function JoinSession() {
