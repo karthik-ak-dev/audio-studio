@@ -63,14 +63,6 @@ async def create_recording(req: CreateRecordingRequest) -> RecordingResponse:
     return _to_recording_response(recording)
 
 
-async def get_recording(recording_id: str) -> RecordingResponse:
-    """Retrieve a recording by ID."""
-    recording: Recording | None = recording_repo.get_by_id(recording_id)
-    if recording is None:
-        raise RecordingNotFoundError(recording_id)
-    return _to_recording_response(recording)
-
-
 async def get_recording_with_sessions(recording_id: str) -> RecordingWithSessionsResponse:
     """Retrieve a recording and all sessions assigned to it."""
     from app.services.session_service import _to_session_response

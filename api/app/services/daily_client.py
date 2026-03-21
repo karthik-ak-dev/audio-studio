@@ -144,30 +144,4 @@ class DailyClient:
             logger.info("Daily API: recording stopped room=%s", room_name)
             return response.json()
 
-    async def delete_room(self, room_name: str) -> None:
-        """Delete a room. Silently ignores 404 (already deleted)."""
-        async with httpx.AsyncClient() as client:
-            response: httpx.Response = await client.delete(
-                f"{self.base_url}/rooms/{room_name}",
-                headers=self.headers,
-                timeout=10.0,
-            )
-            if response.status_code == 404:
-                logger.info("Daily API: room already deleted room=%s", room_name)
-                return
-            response.raise_for_status()
-            logger.info("Daily API: room deleted room=%s", room_name)
-
-    async def get_recording(self, recording_id: str) -> dict[str, object]:
-        """Get recording metadata including S3 keys and track info."""
-        async with httpx.AsyncClient() as client:
-            response: httpx.Response = await client.get(
-                f"{self.base_url}/recordings/{recording_id}",
-                headers=self.headers,
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            return response.json()
-
-
 daily_client: DailyClient = DailyClient()

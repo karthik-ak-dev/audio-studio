@@ -70,11 +70,6 @@ class SessionActionResponse(BaseModel):
     status: str
 
 
-class SessionListResponse(BaseModel):
-    """Paginated list of sessions."""
-    sessions: list[SessionResponse]
-
-
 class RecordingResponse(BaseModel):
     """Single recording returned by API."""
     recording_id: str
