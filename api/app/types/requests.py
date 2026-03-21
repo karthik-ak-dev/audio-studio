@@ -9,15 +9,18 @@ class CreateSessionRequest(BaseModel):
     """Request body for POST /sessions."""
     host_user_id: str = Field(..., min_length=1, max_length=128)
     host_name: str = Field(..., min_length=1, max_length=64)
-    guest_name: str = Field(..., min_length=1, max_length=64)
+    guest_name: str = Field("", max_length=64)
     guest_user_id: Optional[str] = Field(None, max_length=128)
-    topic_id: Optional[str] = Field(None, max_length=64)
+    recording_id: Optional[str] = Field(None, max_length=64)
 
 
-class CreateTopicRequest(BaseModel):
-    """Request body for POST /topics."""
+class CreateRecordingRequest(BaseModel):
+    """Request body for POST /recordings."""
     host_user_id: str = Field(..., min_length=1, max_length=128)
-    topic_name: str = Field(..., min_length=1, max_length=128)
+    host_name: str = Field(..., min_length=1, max_length=64)
+    guest_user_id: str = Field(..., min_length=1, max_length=128)
+    guest_name: str = Field(..., min_length=1, max_length=64)
+    recording_name: str = Field(..., min_length=1, max_length=128)
 
 
 class JoinRequest(BaseModel):

@@ -306,9 +306,9 @@ export function SessionComplete() {
               </div>
             )}
 
-            {/* Topic */}
-            {session.topic_name && (
-              <DetailRow label="Topic" value={session.topic_name} />
+            {/* Recording */}
+            {session.recording_name && (
+              <DetailRow label="Recording" value={session.recording_name} />
             )}
 
             {/* Session ID */}
@@ -321,10 +321,10 @@ export function SessionComplete() {
                   Back to Dashboard
                 </Button>
               </Link>
-              {session.topic_id && (
-                <Link to={`/session/new?topic_id=${session.topic_id}`} className="w-full">
+              {session.recording_id && (
+                <Link to={`/session/new?recording_id=${session.recording_id}`} className="w-full">
                   <Button variant="ghost" size="md" className="w-full">
-                    + Record another session for this topic
+                    + Record another session
                   </Button>
                 </Link>
               )}

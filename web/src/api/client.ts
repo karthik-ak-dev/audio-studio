@@ -6,10 +6,10 @@ import type {
   SessionActionResponse,
 } from "@/types/session";
 import type {
-  Topic,
-  CreateTopicRequest,
-  TopicWithSessions,
-} from "@/types/topic";
+  Recording,
+  CreateRecordingRequest,
+  RecordingWithSessions,
+} from "@/types/recording";
 
 class ApiError extends Error {
   constructor(
@@ -57,6 +57,8 @@ export interface LeaveSessionBody {
 }
 
 export const api = {
+  // ─── Sessions ─────────────────────────────────
+
   createSession(data: CreateSessionRequest): Promise<CreateSessionResponse> {
     return request<CreateSessionResponse>("/sessions/", {
       method: "POST",
@@ -66,6 +68,18 @@ export const api = {
 
   getSession(sessionId: string): Promise<Session> {
     return request<Session>(`/sessions/${sessionId}`);
+  },
+
+  getUserSessions(hostUserId: string, limit = 50): Promise<{ sessions: Session[] }> {
+    return request<{ sessions: Session[] }>(
+      `/sessions/user/${encodeURIComponent(hostUserId)}?limit=${limit}`,
+    );
+  },
+
+  getGuestSessions(guestUserId: string, limit = 50): Promise<{ sessions: Session[] }> {
+    return request<{ sessions: Session[] }>(
+      `/sessions/guest/${encodeURIComponent(guestUserId)}?limit=${limit}`,
+    );
   },
 
   joinSession(sessionId: string, body: JoinSessionBody): Promise<SessionActionResponse> {
@@ -113,34 +127,28 @@ export const api = {
     });
   },
 
-  getUserSessions(hostUserId: string, limit = 50): Promise<{ sessions: Session[] }> {
-    return request<{ sessions: Session[] }>(
-      `/sessions/user/${encodeURIComponent(hostUserId)}?limit=${limit}`,
-    );
-  },
+  // ─── Recordings ─────────────────────────────────
 
-  getGuestSessions(guestUserId: string, limit = 20): Promise<{ sessions: Session[] }> {
-    return request<{ sessions: Session[] }>(
-      `/sessions/guest/${encodeURIComponent(guestUserId)}?limit=${limit}`,
-    );
-  },
-
-  // ─── Topics ─────────────────────────────────────
-
-  createTopic(data: CreateTopicRequest): Promise<Topic> {
-    return request<Topic>("/topics/", {
+  createRecording(data: CreateRecordingRequest): Promise<Recording> {
+    return request<Recording>("/recordings/", {
       method: "POST",
       body: JSON.stringify(data),
     });
   },
 
-  getTopic(topicId: string): Promise<TopicWithSessions> {
-    return request<TopicWithSessions>(`/topics/${topicId}`);
+  getRecording(recordingId: string): Promise<RecordingWithSessions> {
+    return request<RecordingWithSessions>(`/recordings/${recordingId}`);
   },
 
-  getUserTopics(hostUserId: string, limit = 50): Promise<{ topics: Topic[] }> {
-    return request<{ topics: Topic[] }>(
-      `/topics/user/${encodeURIComponent(hostUserId)}?limit=${limit}`,
+  getHostRecordings(hostUserId: string, limit = 50): Promise<{ recordings: Recording[] }> {
+    return request<{ recordings: Recording[] }>(
+      `/recordings/host/${encodeURIComponent(hostUserId)}?limit=${limit}`,
+    );
+  },
+
+  getGuestRecordings(guestUserId: string, limit = 50): Promise<{ recordings: Recording[] }> {
+    return request<{ recordings: Recording[] }>(
+      `/recordings/guest/${encodeURIComponent(guestUserId)}?limit=${limit}`,
     );
   },
 } as const;

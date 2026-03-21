@@ -8,7 +8,7 @@ import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
 import { api } from "@/api/client";
 import { getStoredEmail, getStoredName } from "@/pages/Landing";
-import type { Topic } from "@/types/topic";
+import type { Recording } from "@/types/recording";
 
 const STORAGE_PREFIX = "recstudio:";
 
@@ -21,61 +21,50 @@ export function CreateSession() {
   const userEmail = getStoredEmail();
   const userName = getStoredName();
 
-  // Redirect to landing if no identity
   useEffect(() => {
     if (!userEmail || !userName) {
       navigate("/", { replace: true });
     }
   }, [userEmail, userName, navigate]);
 
-  const [hostName, setHostName] = useState(userName ?? "");
+  const hostName = userName ?? "";
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
 
-  // Topic selection
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [selectedTopicId, setSelectedTopicId] = useState<string>(
-    searchParams.get("topic_id") ?? "",
-  );
-  const [showNewTopic, setShowNewTopic] = useState(false);
-  const [newTopicName, setNewTopicName] = useState("");
-  const [topicLoading, setTopicLoading] = useState(false);
+  // Recording context — pre-filled when recording_id is in URL
+  const recordingIdParam = searchParams.get("recording_id");
+  const [recording, setRecording] = useState<Recording | null>(null);
+  const [recordingLoading, setRecordingLoading] = useState(!!recordingIdParam);
 
-  // Fetch user's topics on mount
+  // Fetch recording details if recording_id is in URL
   useEffect(() => {
-    if (!userEmail) return;
-    api.getUserTopics(userEmail).then((res) => setTopics(res.topics)).catch(() => {});
-  }, [userEmail]);
+    if (!recordingIdParam) return;
+    setRecordingLoading(true);
+    api
+      .getRecording(recordingIdParam)
+      .then((res) => {
+        setRecording(res.recording);
+        setGuestName(res.recording.guest_name);
+        setGuestEmail(res.recording.guest_user_id);
+      })
+      .catch(() => {
+        // Recording not found — fall back to standalone mode
+        setRecording(null);
+      })
+      .finally(() => setRecordingLoading(false));
+  }, [recordingIdParam]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearError();
     if (!userEmail) return;
 
-    let topicId: string | undefined = selectedTopicId || undefined;
-
-    // Create new topic if needed
-    if (showNewTopic && newTopicName.trim()) {
-      setTopicLoading(true);
-      try {
-        const topic = await api.createTopic({
-          host_user_id: userEmail,
-          topic_name: newTopicName.trim(),
-        });
-        topicId = topic.topic_id;
-      } catch {
-        return;
-      } finally {
-        setTopicLoading(false);
-      }
-    }
-
     const result = await createSession({
       host_user_id: userEmail,
       host_name: hostName.trim(),
-      guest_name: guestName.trim(),
-      guest_user_id: guestEmail.trim().toLowerCase() || undefined,
-      topic_id: topicId,
+      guest_name: recording ? recording.guest_name : guestName.trim(),
+      guest_user_id: recording ? recording.guest_user_id : guestEmail.trim().toLowerCase() || undefined,
+      recording_id: recording?.recording_id,
     });
 
     if (result) {
@@ -97,7 +86,7 @@ export function CreateSession() {
           hostToken: result.host_token,
           guestJoinUrl: result.guest_join_url,
           hostName: hostName.trim(),
-          guestName: guestName.trim(),
+          guestName: recording ? recording.guest_name : guestName.trim(),
           hostUserId: userEmail,
         },
       });
@@ -105,18 +94,10 @@ export function CreateSession() {
     }
   };
 
-  const handleTopicChange = (value: string) => {
-    if (value === "__new__") {
-      setShowNewTopic(true);
-      setSelectedTopicId("");
-    } else {
-      setShowNewTopic(false);
-      setNewTopicName("");
-      setSelectedTopicId(value);
-    }
-  };
-
   if (!userEmail || !userName) return null;
+
+  const isRecordingMode = !!recording;
+  const canSubmit = isRecordingMode || !!guestName.trim();
 
   return (
     <PageContainer>
@@ -140,95 +121,80 @@ export function CreateSession() {
           <h1 className="text-3xl font-black tracking-tight text-text md:text-4xl">
             New <span className="text-gradient-accent">Session</span>
           </h1>
-          <p className="mt-3 text-sm leading-relaxed text-text-muted">
-            Start an audio recording session with a guest.
-            <br className="hidden sm:block" />
-            You'll get a shareable link after creating.
-          </p>
+          {isRecordingMode ? (
+            <p className="mt-3 text-sm leading-relaxed text-text-muted">
+              Adding to: <span className="text-text font-medium">{recording.recording_name}</span>
+            </p>
+          ) : (
+            <p className="mt-3 text-sm leading-relaxed text-text-muted">
+              Quick standalone recording session.
+            </p>
+          )}
         </div>
 
         <Card>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-            <div className="space-y-5">
-              <Input
-                label="Your Name"
-                placeholder="Enter your name"
-                value={hostName}
-                onChange={(e) => setHostName(e.target.value)}
-                required
-                maxLength={64}
-                autoFocus
-              />
-
-              <Input
-                label="Guest Email"
-                type="email"
-                placeholder="guest@example.com"
-                value={guestEmail}
-                onChange={(e) => setGuestEmail(e.target.value)}
-              />
-
-              <Input
-                label="Guest Name"
-                placeholder="Enter guest's name"
-                value={guestName}
-                onChange={(e) => setGuestName(e.target.value)}
-                required
-                maxLength={64}
-              />
-
-              {/* Topic selection */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-                  Topic (optional)
-                </label>
-                <select
-                  value={showNewTopic ? "__new__" : selectedTopicId}
-                  onChange={(e) => handleTopicChange(e.target.value)}
-                  className="w-full rounded-md bg-white/[0.04] border border-border px-4 py-3 text-text outline-none transition-all duration-200 focus:border-accent/50 focus:ring-1 focus:ring-accent/20"
-                >
-                  <option value="">None</option>
-                  {topics.map((t) => (
-                    <option key={t.topic_id} value={t.topic_id}>
-                      {t.topic_name}
-                    </option>
-                  ))}
-                  <option value="__new__">+ Create new topic...</option>
-                </select>
-              </div>
-
-              {showNewTopic && (
-                <Input
-                  label="New Topic Name"
-                  placeholder="e.g. Ticket Booking"
-                  value={newTopicName}
-                  onChange={(e) => setNewTopicName(e.target.value)}
-                  required
-                  maxLength={128}
-                />
-              )}
+          {recordingLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
             </div>
-
-            {error && (
-              <div className="flex items-start gap-3 rounded-md bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
-                <svg viewBox="0 0 20 20" fill="currentColor" className="mt-0.5 h-4 w-4 shrink-0 text-red-400">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
-                </svg>
-                <span className="text-sm text-red-400">{error}</span>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+              {/* Host identity (read-only) */}
+              <div className="flex items-center gap-3 rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.06]">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent">
+                  {hostName.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-text">{hostName}</span>
+                  <span className="text-xs text-text-muted">{userEmail}</span>
+                </div>
+                <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-text-muted">Host</span>
               </div>
-            )}
 
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              loading={loading || topicLoading}
-              disabled={!hostName.trim() || !guestName.trim() || (showNewTopic && !newTopicName.trim())}
-              className="mt-1 w-full"
-            >
-              Create Session
-            </Button>
-          </form>
+              <div className="space-y-5">
+                <Input
+                  label="Guest Email"
+                  type="email"
+                  placeholder="guest@example.com"
+                  value={guestEmail}
+                  onChange={(e) => setGuestEmail(e.target.value)}
+                  disabled={isRecordingMode}
+                  className={isRecordingMode ? "opacity-60" : ""}
+                />
+
+                <Input
+                  label="Guest Name"
+                  placeholder="Enter guest's name"
+                  value={guestName}
+                  onChange={(e) => setGuestName(e.target.value)}
+                  required={!isRecordingMode}
+                  maxLength={64}
+                  disabled={isRecordingMode}
+                  className={isRecordingMode ? "opacity-60" : ""}
+                />
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-3 rounded-md bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="mt-0.5 h-4 w-4 shrink-0 text-red-400">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-sm text-red-400">{error}</span>
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                loading={loading}
+                disabled={!canSubmit}
+                className="mt-1 w-full"
+              >
+                Create Session
+              </Button>
+            </form>
+          )}
         </Card>
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">

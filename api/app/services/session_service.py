@@ -60,14 +60,25 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     """Create a new session: Daily.co room + host/guest tokens + DynamoDB record."""
     session_id: str = _generate_session_id()
 
-    # If topic_id is provided, validate it exists and grab the name for denormalization
-    topic_name: str | None = None
-    if req.topic_id:
-        from app.repos import topic_repo
-        topic = topic_repo.get_by_id(req.topic_id)
-        if topic is None:
-            raise InvalidSessionStateError(session_id, SessionStatus.CREATED, "invalid topic_id")
-        topic_name = topic.topic_name
+    # If recording_id is provided, validate it exists and pull identity from it
+    recording_name: str | None = None
+    rec_host_name: str | None = None
+    rec_guest_name: str | None = None
+    rec_guest_user_id: str | None = None
+    if req.recording_id:
+        from app.repos import recording_repo
+        recording = recording_repo.get_by_id(req.recording_id)
+        if recording is None:
+            raise InvalidSessionStateError(session_id, SessionStatus.CREATED, "invalid recording_id")
+        if recording.host_user_id != req.host_user_id:
+            raise InvalidSessionStateError(
+                session_id, SessionStatus.CREATED,
+                "recording does not belong to this host",
+            )
+        recording_name = recording.recording_name
+        rec_host_name = recording.host_name
+        rec_guest_name = recording.guest_name
+        rec_guest_user_id = recording.guest_user_id
 
     room: dict[str, object] = await daily_client.create_room(session_id)
     room_name: str = str(room["name"])
@@ -75,19 +86,21 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     room_config: dict[str, object] = room.get("config", {})  # type: ignore[assignment]
     room_expires_at: str = unix_to_iso(int(room_config["exp"]))
 
-    # Use guest_user_id from request if provided, otherwise fall back to generated ID
-    guest_user_id: str = req.guest_user_id if req.guest_user_id else f"guest-{session_id}"
+    # When recording_id is set, identity comes from the Recording — not the request
+    host_name: str = rec_host_name if rec_host_name else req.host_name
+    guest_name: str = rec_guest_name if rec_guest_name else req.guest_name
+    guest_user_id: str = rec_guest_user_id or req.guest_user_id or f"guest-{session_id}"
 
     host_token: str = await daily_client.create_token(
         room_name=room_name,
         user_id=req.host_user_id,
-        user_name=req.host_name,
+        user_name=host_name,
         is_owner=True,
     )
     guest_token: str = await daily_client.create_token(
         room_name=room_name,
         user_id=guest_user_id,
-        user_name=req.guest_name,
+        user_name=guest_name,
         is_owner=False,
     )
 
@@ -95,11 +108,11 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     session: Session = Session(
         session_id=session_id,
         host_user_id=req.host_user_id,
-        host_name=req.host_name,
-        guest_name=req.guest_name,
-        guest_user_id=req.guest_user_id,
-        topic_id=req.topic_id,
-        topic_name=topic_name,
+        host_name=host_name,
+        guest_name=guest_name,
+        guest_user_id=guest_user_id if guest_user_id != f"guest-{session_id}" else None,
+        recording_id=req.recording_id,
+        recording_name=recording_name,
         daily_room_name=room_name,
         daily_room_url=room_url,
         status=SessionStatus.CREATED,
@@ -112,8 +125,8 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     session_repo.create(session)
 
     logger.info(
-        "Session created: id=%s room=%s host=%s topic=%s",
-        session_id, room_name, req.host_user_id, req.topic_id,
+        "Session created: id=%s room=%s host=%s recording=%s",
+        session_id, room_name, req.host_user_id, req.recording_id,
     )
 
     return CreateSessionResponse(
@@ -201,21 +214,21 @@ async def start_recording(session_id: str) -> SessionActionResponse:
         )
 
     result: dict[str, object] = await daily_client.start_recording(session.daily_room_name)
-    recording_id = str(result.get("recordingId", ""))
+    daily_recording_id = str(result.get("recordingId", ""))
 
     success: bool = session_repo.conditional_update_status(
         session_id=session_id,
         new_status=SessionStatus.RECORDING,
         required_status=SessionStatus.READY,
-        recording_id=recording_id,
+        daily_recording_id=daily_recording_id,
         recording_started_at=now_iso(),
     )
     if not success:
         raise InvalidSessionStateError(session_id, session.status, "start recording")
 
     logger.info(
-        "Recording started: session=%s recording_id=%s",
-        session_id, recording_id,
+        "Recording started: session=%s daily_recording_id=%s",
+        session_id, daily_recording_id,
     )
     return SessionActionResponse(session_id=session_id, status=SessionStatus.RECORDING)
 
@@ -390,16 +403,18 @@ async def leave_session(session_id: str, req: LeaveRequest) -> SessionActionResp
     return SessionActionResponse(session_id=session_id, status=session.status)
 
 
+async def list_sessions_by_guest(guest_user_id: str, limit: int = 20) -> list[SessionResponse]:
+    """List sessions where user was a guest, ordered by most recent first."""
+    sessions: list[Session] = session_repo.get_by_guest(guest_user_id, limit=limit)
+    return [_to_session_response(s) for s in sessions]
+
+
 async def list_sessions_by_host(host_user_id: str, limit: int = 20) -> list[SessionResponse]:
     """List sessions for a given host user, ordered by most recent first."""
     sessions: list[Session] = session_repo.get_by_host(host_user_id, limit=limit)
     return [_to_session_response(s) for s in sessions]
 
 
-async def list_sessions_by_guest(guest_user_id: str, limit: int = 20) -> list[SessionResponse]:
-    """List sessions where user was a guest, ordered by most recent first."""
-    sessions: list[Session] = session_repo.get_by_guest(guest_user_id, limit=limit)
-    return [_to_session_response(s) for s in sessions]
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -759,8 +774,8 @@ def _to_session_response(session: Session) -> SessionResponse:
         host_name=session.host_name,
         guest_name=session.guest_name,
         guest_user_id=session.guest_user_id,
-        topic_id=session.topic_id,
-        topic_name=session.topic_name,
+        recording_id=session.recording_id,
+        recording_name=session.recording_name,
         daily_room_url=session.daily_room_url,
         participant_count=session.participant_count,
         active_participants=sorted(session.active_participants),

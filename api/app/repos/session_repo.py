@@ -275,12 +275,12 @@ def get_by_guest(guest_user_id: str, limit: int = 20) -> list[Session]:
     return [Session.from_dynamo_item(item) for item in items]
 
 
-def get_by_topic(topic_id: str, limit: int = 50) -> list[Session]:
-    """Query sessions by topic_id using the TopicIndex GSI."""
+def get_by_recording(recording_id: str, limit: int = 50) -> list[Session]:
+    """Query sessions by recording_id using the RecordingIndex GSI."""
     response = table.query(
-        IndexName="TopicIndex",
-        KeyConditionExpression="topic_id = :tid",
-        ExpressionAttributeValues={":tid": topic_id},
+        IndexName="RecordingIndex",
+        KeyConditionExpression="recording_id = :rid",
+        ExpressionAttributeValues={":rid": recording_id},
         ScanIndexForward=False,
         Limit=limit,
     )

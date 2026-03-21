@@ -8,49 +8,52 @@ import { Loader } from "@/components/ui/Loader";
 import { api } from "@/api/client";
 import { getStoredEmail, getStoredName, clearStoredIdentity } from "@/pages/Landing";
 import type { Session } from "@/types/session";
-import type { Topic } from "@/types/topic";
+import type { Recording } from "@/types/recording";
 
-interface TopicGroup {
-  topic: Topic | null;
+interface RecordingGroup {
+  recording: Recording | null;
   sessions: Session[];
 }
 
-function groupSessionsByTopic(
+function groupSessionsByRecording(
   sessions: Session[],
-  topics: Topic[],
-): TopicGroup[] {
-  const topicMap = new Map<string, Topic>();
-  for (const t of topics) topicMap.set(t.topic_id, t);
+  recordings: Recording[],
+): RecordingGroup[] {
+  const recordingMap = new Map<string, Recording>();
+  for (const r of recordings) recordingMap.set(r.recording_id, r);
 
   const grouped = new Map<string, Session[]>();
-  const ungrouped: Session[] = [];
+  const standalone: Session[] = [];
 
   for (const s of sessions) {
-    if (s.topic_id) {
-      const existing = grouped.get(s.topic_id) ?? [];
+    if (s.recording_id) {
+      const existing = grouped.get(s.recording_id) ?? [];
       existing.push(s);
-      grouped.set(s.topic_id, existing);
+      grouped.set(s.recording_id, existing);
     } else {
-      ungrouped.push(s);
+      standalone.push(s);
     }
   }
 
-  const result: TopicGroup[] = [];
-  for (const [topicId, topicSessions] of grouped) {
+  const result: RecordingGroup[] = [];
+  for (const [recordingId, recSessions] of grouped) {
     result.push({
-      topic: topicMap.get(topicId) ?? {
-        topic_id: topicId,
+      recording: recordingMap.get(recordingId) ?? {
+        recording_id: recordingId,
         host_user_id: "",
-        topic_name: topicSessions[0]?.topic_name ?? "Unknown Topic",
+        host_name: "",
+        guest_user_id: "",
+        guest_name: recSessions[0]?.guest_name ?? "",
+        recording_name: recSessions[0]?.recording_name ?? "Unknown Recording",
         created_at: "",
         updated_at: "",
       },
-      sessions: topicSessions,
+      sessions: recSessions,
     });
   }
 
-  if (ungrouped.length > 0) {
-    result.push({ topic: null, sessions: ungrouped });
+  if (standalone.length > 0) {
+    result.push({ recording: null, sessions: standalone });
   }
 
   return result;
@@ -75,10 +78,34 @@ function statusBadge(status: string) {
   }
 }
 
-function formatDate(iso: string): string {
+function formatTime(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
+  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
+
+/** Reusable key-value row for session details */
+function KV({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] font-medium uppercase tracking-wider text-text-muted/60">{label}:</span>
+      <span className="text-xs text-text">{children}</span>
+    </div>
+  );
+}
+
+function formatDatetime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("en-IN", { month: "short", day: "numeric" })} ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+const ACTIVE_STATUSES = new Set(["created", "waiting_for_guest", "ready", "recording", "paused"]);
+
+const CopyIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -86,8 +113,8 @@ export function Dashboard() {
   const userName = getStoredName();
 
   const [loading, setLoading] = useState(true);
-  const [topicGroups, setTopicGroups] = useState<TopicGroup[]>([]);
-  const [collapsedTopics, setCollapsedTopics] = useState<Set<string>>(new Set());
+  const [recordingGroups, setRecordingGroups] = useState<RecordingGroup[]>([]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!userEmail) {
@@ -97,24 +124,29 @@ export function Dashboard() {
 
     async function loadData() {
       try {
-        const [hostRes, guestRes, topicsRes] = await Promise.all([
+        const [hostSessions, guestSessions, hostRecordings, guestRecordings] = await Promise.all([
           api.getUserSessions(userEmail!).catch(() => ({ sessions: [] as Session[] })),
-          api.getGuestSessions(userEmail!, 50).catch(() => ({ sessions: [] as Session[] })),
-          api.getUserTopics(userEmail!).catch(() => ({ topics: [] as Topic[] })),
+          api.getGuestSessions(userEmail!).catch(() => ({ sessions: [] as Session[] })),
+          api.getHostRecordings(userEmail!).catch(() => ({ recordings: [] as Recording[] })),
+          api.getGuestRecordings(userEmail!).catch(() => ({ recordings: [] as Recording[] })),
         ]);
 
-        // Deduplicate sessions (in case same session appears in both)
+        // Deduplicate sessions
         const sessionMap = new Map<string, Session>();
-        for (const s of [...hostRes.sessions, ...guestRes.sessions]) {
+        for (const s of [...hostSessions.sessions, ...guestSessions.sessions]) {
           sessionMap.set(s.session_id, s);
         }
         const allSessions = Array.from(sessionMap.values());
-
-        // Sort by created_at descending
         allSessions.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-        const topics = topicsRes.topics;
-        setTopicGroups(groupSessionsByTopic(allSessions, topics));
+        // Deduplicate recordings
+        const recMap = new Map<string, Recording>();
+        for (const r of [...hostRecordings.recordings, ...guestRecordings.recordings]) {
+          recMap.set(r.recording_id, r);
+        }
+        const allRecordings = Array.from(recMap.values());
+
+        setRecordingGroups(groupSessionsByRecording(allSessions, allRecordings));
       } catch {
         // Silently handle errors
       } finally {
@@ -125,8 +157,8 @@ export function Dashboard() {
     loadData();
   }, [userEmail, navigate]);
 
-  const toggleTopic = (key: string) => {
-    setCollapsedTopics((prev) => {
+  const toggleGroup = (key: string) => {
+    setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -134,8 +166,8 @@ export function Dashboard() {
     });
   };
 
-  const copyTopicId = (topicId: string) => {
-    navigator.clipboard.writeText(topicId);
+  const copyId = (id: string) => {
+    navigator.clipboard.writeText(id);
   };
 
   const handleLogout = () => {
@@ -145,12 +177,9 @@ export function Dashboard() {
 
   if (!userEmail || !userName) return null;
 
-  const isActiveSession = (status: string) =>
-    ["created", "waiting_for_guest", "ready", "recording", "paused"].includes(status);
-
   return (
     <PageContainer>
-      <div className="mx-auto max-w-3xl animate-slide-up">
+      <div className="mx-auto max-w-5xl animate-slide-up">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
@@ -163,9 +192,16 @@ export function Dashboard() {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => navigate("/session/new")}
+              onClick={() => navigate("/recordings/new")}
             >
               + New Recording
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => navigate("/session/new")}
+            >
+              Quick Session
             </Button>
             <button
               onClick={handleLogout}
@@ -184,7 +220,7 @@ export function Dashboard() {
         )}
 
         {/* Empty state */}
-        {!loading && topicGroups.length === 0 && (
+        {!loading && recordingGroups.length === 0 && (
           <Card>
             <div className="py-12 text-center">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04]">
@@ -196,12 +232,12 @@ export function Dashboard() {
               </div>
               <p className="text-sm text-text-muted">No recordings yet</p>
               <p className="mt-1 text-xs text-text-muted/70">
-                Create your first recording session to get started.
+                Create your first recording to get started.
               </p>
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => navigate("/session/new")}
+                onClick={() => navigate("/recordings/new")}
                 className="mt-4"
               >
                 + New Recording
@@ -210,18 +246,24 @@ export function Dashboard() {
           </Card>
         )}
 
-        {/* Topic groups */}
+        {/* Recording groups */}
         {!loading &&
-          topicGroups.map((group) => {
-            const key = group.topic?.topic_id ?? "__ungrouped__";
-            const isCollapsed = collapsedTopics.has(key);
+          recordingGroups.map((group) => {
+            const key = group.recording?.recording_id ?? "__standalone__";
+            const isCollapsed = collapsed.has(key);
+            const isRecordingHost = group.recording?.host_user_id === userEmail;
+            const withPerson = group.recording
+              ? isRecordingHost
+                ? `${group.recording.guest_name} (${group.recording.guest_user_id})`
+                : `${group.recording.host_name} (${group.recording.host_user_id})`
+              : null;
 
             return (
-              <div key={key} className="mb-6">
-                {/* Topic header */}
+              <div key={key} className="mb-8">
+                {/* Group header */}
                 <button
-                  onClick={() => toggleTopic(key)}
-                  className="mb-2 flex w-full items-center gap-2 text-left"
+                  onClick={() => toggleGroup(key)}
+                  className="mb-3 flex w-full items-center gap-2.5 text-left"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -230,86 +272,120 @@ export function Dashboard() {
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className={`h-3.5 w-3.5 text-text-muted transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+                    className={`h-4 w-4 text-text-muted transition-transform ${isCollapsed ? "" : "rotate-90"}`}
                   >
                     <polyline points="9 18 15 12 9 6" />
                   </svg>
-                  <span className="text-sm font-semibold text-text">
-                    {group.topic ? group.topic.topic_name : "Ungrouped"}
+                  <span className="text-base font-semibold text-text">
+                    {group.recording ? group.recording.recording_name : "Standalone Sessions"}
                   </span>
+                  {withPerson && (
+                    <span className="text-xs text-text-muted">
+                      — with {withPerson}
+                    </span>
+                  )}
                   <span className="text-xs text-text-muted">
                     ({group.sessions.length} session{group.sessions.length !== 1 ? "s" : ""})
                   </span>
-                  {group.topic && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        copyTopicId(group.topic!.topic_id);
-                      }}
-                      className="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-xs text-text-muted hover:bg-white/[0.04] hover:text-text transition-colors"
-                      title="Copy Topic ID"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                      ID
-                    </button>
-                  )}
                 </button>
 
-                {/* Session rows */}
-                {!isCollapsed && (
-                  <Card>
-                    <div className="divide-y divide-white/[0.04]">
-                      {group.sessions.map((session) => {
-                        const otherPerson =
-                          session.host_user_id === userEmail
-                            ? session.guest_name
-                            : session.host_name;
-                        const role =
-                          session.host_user_id === userEmail ? "Host" : "Guest";
+                {/* Recording ID bar */}
+                {group.recording && !isCollapsed && (
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="text-[11px] font-medium uppercase tracking-wider text-text-muted/60">Recording ID:</span>
+                    <span className="font-mono text-xs text-text-muted">{group.recording.recording_id}</span>
+                    <button
+                      onClick={() => copyId(group.recording!.recording_id)}
+                      className="flex items-center rounded p-1 text-text-muted/50 hover:bg-white/[0.04] hover:text-text transition-colors"
+                      title="Copy Recording ID"
+                    >
+                      <CopyIcon />
+                    </button>
+                  </div>
+                )}
 
+                {/* Session cards + Add button */}
+                {!isCollapsed && (
+                  <div className="flex flex-col gap-3">
+                    {/* Scrollable session list */}
+                    <div className="flex flex-col gap-3 max-h-[480px] overflow-y-auto scrollbar-hide">
+                      {group.sessions.map((session) => {
+                        const isHost = session.host_user_id === userEmail;
                         return (
-                          <div
-                            key={session.session_id}
-                            className="flex items-center gap-4 px-1 py-3 first:pt-0 last:pb-0"
-                          >
-                            <span className="min-w-[52px] text-xs text-text-muted">
-                              {formatDate(session.created_at)}
-                            </span>
-                            <span className="flex-1 truncate text-sm text-text">
-                              with {otherPerson}
-                            </span>
-                            <span className="text-xs text-text-muted">{role}</span>
-                            {statusBadge(session.status)}
-                            {isActiveSession(session.status) ? (
-                              <Link
-                                to={`/session/${session.session_id}`}
-                                className="text-xs font-medium text-accent hover:underline"
-                              >
-                                Go
-                              </Link>
-                            ) : session.status === "completed" ? (
-                              <Link
-                                to={`/session/${session.session_id}/complete`}
-                                className="text-xs font-medium text-accent hover:underline"
-                              >
-                                View
-                              </Link>
-                            ) : session.status === "processing" ? (
-                              <Link
-                                to={`/session/${session.session_id}/complete`}
-                                className="text-xs font-medium text-text-muted hover:underline"
-                              >
-                                View
-                              </Link>
-                            ) : null}
-                          </div>
+                          <Card key={session.session_id}>
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex flex-col gap-2">
+                                <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+                                  <KV label="Session ID">
+                                    <span className="font-mono">{session.session_id}</span>
+                                  </KV>
+                                  <KV label="Status">{statusBadge(session.status)}</KV>
+                                  <KV label="Role">{isHost ? "Host" : "Guest"}</KV>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+                                  {!group.recording && (
+                                    <KV label={isHost ? "Guest" : "Host"}>
+                                      {isHost ? session.guest_name : session.host_name}
+                                    </KV>
+                                  )}
+                                  {session.recording_started_at && session.recording_stopped_at ? (
+                                    <KV label="Recorded">
+                                      {formatDatetime(session.recording_started_at)} — {formatTime(session.recording_stopped_at)}
+                                    </KV>
+                                  ) : session.recording_started_at ? (
+                                    <KV label="Started">{formatDatetime(session.recording_started_at)}</KV>
+                                  ) : (
+                                    <KV label="Created">{formatDatetime(session.created_at)}</KV>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 pt-0.5">
+                                {ACTIVE_STATUSES.has(session.status) ? (
+                                  <Link
+                                    to={(() => {
+                                      const url = isHost ? session.host_rejoin_url : session.guest_rejoin_url;
+                                      if (!url) return `/session/${session.session_id}`;
+                                      const parsed = new URL(url);
+                                      return parsed.pathname + parsed.search;
+                                    })()}
+                                    className="rounded-md bg-accent/10 px-4 py-1.5 text-xs font-semibold text-accent hover:bg-accent/20 transition-colors"
+                                  >
+                                    Go
+                                  </Link>
+                                ) : session.status === "completed" || session.status === "processing" ? (
+                                  <Link
+                                    to={`/session/${session.session_id}/complete`}
+                                    className={`rounded-md px-4 py-1.5 text-xs font-semibold transition-colors ${
+                                      session.status === "completed"
+                                        ? "bg-accent/10 text-accent hover:bg-accent/20"
+                                        : "bg-white/[0.04] text-text-muted hover:bg-white/[0.08]"
+                                    }`}
+                                  >
+                                    View
+                                  </Link>
+                                ) : null}
+                              </div>
+                            </div>
+                          </Card>
                         );
                       })}
                     </div>
-                  </Card>
+
+                    {/* Fixed Add session button */}
+                    {group.recording && group.recording.host_user_id === userEmail && (
+                      <Link
+                        to={`/session/new?recording_id=${group.recording.recording_id}`}
+                        className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/[0.08] py-3 text-xs font-medium text-accent/70 hover:border-accent/30 hover:text-accent transition-colors"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                          <line x1="12" x2="12" y1="5" y2="19" />
+                          <line x1="5" x2="19" y1="12" y2="12" />
+                        </svg>
+                        Add Session to this Recording
+                      </Link>
+                    )}
+                  </div>
                 )}
               </div>
             );

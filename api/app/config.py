@@ -6,8 +6,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Environment-based application settings."""
     environment: str = "dev"
-    sessions_table: str = "dev-recstudio-sessions"
-    topics_table: str = "dev-recstudio-topics"
+    sessions_table: str = "dev-recstudio-recording-sessions"
+    recordings_table: str = "dev-recstudio-recordings"
     recordings_bucket: str = ""
     daily_api_key: str = ""
     daily_webhook_secret: str = ""

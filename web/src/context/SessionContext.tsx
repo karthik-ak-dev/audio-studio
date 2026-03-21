@@ -23,8 +23,8 @@ interface SessionState {
   guestName: string | null;
   hostUserId: string | null;
   guestUserId: string | null;
-  topicId: string | null;
-  topicName: string | null;
+  recordingId: string | null;
+  recordingName: string | null;
   participantCount: number;
   activeParticipants: string[];
   participantsRoster: Record<string, string>;
@@ -52,8 +52,8 @@ const initialState: SessionState = {
   guestName: null,
   hostUserId: null,
   guestUserId: null,
-  topicId: null,
-  topicName: null,
+  recordingId: null,
+  recordingName: null,
   participantCount: 0,
   activeParticipants: [],
   participantsRoster: {},
@@ -135,8 +135,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         guestName: s.guest_name,
         hostUserId: s.host_user_id,
         guestUserId: s.guest_user_id,
-        topicId: s.topic_id,
-        topicName: s.topic_name,
+        recordingId: s.recording_id,
+        recordingName: s.recording_name,
         participantCount: s.participant_count,
         activeParticipants: s.active_participants,
         participantsRoster: s.participants,

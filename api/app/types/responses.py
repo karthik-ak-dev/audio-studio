@@ -22,8 +22,8 @@ class SessionResponse(BaseModel):
     host_name: str
     guest_name: str
     guest_user_id: Optional[str] = None
-    topic_id: Optional[str] = None
-    topic_name: Optional[str] = None
+    recording_id: Optional[str] = None
+    recording_name: Optional[str] = None
     daily_room_url: Optional[str] = None
 
     # Participant tracking — derived from DynamoDB fields
@@ -71,20 +71,23 @@ class SessionActionResponse(BaseModel):
 
 
 class SessionListResponse(BaseModel):
-    """Paginated list of sessions for a host."""
+    """Paginated list of sessions."""
     sessions: list[SessionResponse]
 
 
-class TopicResponse(BaseModel):
-    """Single topic returned by API."""
-    topic_id: str
+class RecordingResponse(BaseModel):
+    """Single recording returned by API."""
+    recording_id: str
     host_user_id: str
-    topic_name: str
+    host_name: str
+    guest_user_id: str
+    guest_name: str
+    recording_name: str
     created_at: str
     updated_at: str
 
 
-class TopicWithSessionsResponse(BaseModel):
-    """Topic with all its sessions — used for shared topic view."""
-    topic: TopicResponse
+class RecordingWithSessionsResponse(BaseModel):
+    """Recording with all its sessions — used for shared recording view."""
+    recording: RecordingResponse
     sessions: list[SessionResponse]

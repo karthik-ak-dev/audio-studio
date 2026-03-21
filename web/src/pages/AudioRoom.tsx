@@ -575,8 +575,8 @@ export function AudioRoom() {
                       Session Info
                     </span>
                     <div className="space-y-2">
-                      {sessionState.topicName && (
-                        <InfoRow label="Topic" value={sessionState.topicName} />
+                      {sessionState.recordingName && (
+                        <InfoRow label="Recording" value={sessionState.recordingName} />
                       )}
                       <InfoRow label="Session ID" value={sessionId ?? ""} mono />
                       {sessionState.hostName && (

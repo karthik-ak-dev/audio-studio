@@ -31,10 +31,10 @@ class Session:  # pylint: disable=too-many-instance-attributes
     daily_room_url: str
     status: SessionStatus
 
-    # Optional identity/topic fields
+    # Optional identity/recording fields
     guest_user_id: Optional[str] = None
-    topic_id: Optional[str] = None
-    topic_name: Optional[str] = None
+    recording_id: Optional[str] = None
+    recording_name: Optional[str] = None
 
     # Participant tracking (4 fields — see module docstring)
     active_participants: set[str] = field(default_factory=set)
@@ -45,8 +45,8 @@ class Session:  # pylint: disable=too-many-instance-attributes
     # Optimistic locking
     version: int = 0
 
-    # Recording state
-    recording_id: str = ""
+    # Recording state (Daily.co recording ID, not the Recording entity)
+    daily_recording_id: str = ""
     recording_started_at: Optional[str] = None
     recording_stopped_at: Optional[str] = None
     pause_events: list[dict[str, Optional[str]]] = field(default_factory=list)
@@ -85,18 +85,18 @@ class Session:  # pylint: disable=too-many-instance-attributes
             "daily_room_url": self.daily_room_url,
             "status": self.status.value,
             "version": self.version,
-            "recording_id": self.recording_id,
+            "daily_recording_id": self.daily_recording_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
 
-        # Optional identity/topic fields
+        # Optional identity/recording fields
         if self.guest_user_id is not None:
             item["guest_user_id"] = self.guest_user_id
-        if self.topic_id is not None:
-            item["topic_id"] = self.topic_id
-        if self.topic_name is not None:
-            item["topic_name"] = self.topic_name
+        if self.recording_id is not None:
+            item["recording_id"] = self.recording_id
+        if self.recording_name is not None:
+            item["recording_name"] = self.recording_name
 
         if self.room_expires_at is not None:
             item["room_expires_at"] = self.room_expires_at
@@ -168,8 +168,8 @@ class Session:  # pylint: disable=too-many-instance-attributes
             host_name=str(item["host_name"]),
             guest_name=str(item["guest_name"]),
             guest_user_id=_opt_str(item, "guest_user_id"),
-            topic_id=_opt_str(item, "topic_id"),
-            topic_name=_opt_str(item, "topic_name"),
+            recording_id=_opt_str(item, "recording_id"),
+            recording_name=_opt_str(item, "recording_name"),
             daily_room_name=str(item["daily_room_name"]),
             daily_room_url=str(item["daily_room_url"]),
             status=SessionStatus(str(item["status"])),
@@ -178,7 +178,7 @@ class Session:  # pylint: disable=too-many-instance-attributes
             participants=roster,
             connection_history=conn_history,
             version=int(item.get("version", 0)),  # type: ignore[arg-type]
-            recording_id=str(item.get("recording_id", "")),
+            daily_recording_id=str(item.get("daily_recording_id", "")),
             pause_events=pause_events,
             recording_started_at=_opt_str(item, "recording_started_at"),
             recording_stopped_at=_opt_str(item, "recording_stopped_at"),

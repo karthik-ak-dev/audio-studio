@@ -30,7 +30,7 @@ GUEST_ADMIN_PERMISSIONS: list[str] = []
 
 # DynamoDB
 SESSION_ID_LENGTH: int = 12
-TOPIC_ID_LENGTH: int = 8
+RECORDING_ID_LENGTH: int = 8
 
 # S3 presigned URLs — max for Lambda IAM role is ~12h; 6h is a safe default
 PRESIGNED_URL_EXPIRY_SEC: int = 6 * 60 * 60  # 6 hours
