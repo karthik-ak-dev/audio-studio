@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { api } from "@/api/client";
 import { getStoredEmail, getStoredName } from "@/pages/Landing";
+import { nameFromEmail } from "@/utils/identity";
 
 export function CreateRecording() {
   const navigate = useNavigate();
@@ -13,14 +14,13 @@ export function CreateRecording() {
   const userName = getStoredName();
 
   useEffect(() => {
-    if (!userEmail || !userName) {
+    if (!userEmail) {
       navigate("/", { replace: true });
     }
-  }, [userEmail, userName, navigate]);
+  }, [userEmail, navigate]);
 
   const [recordingName, setRecordingName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
-  const [guestName, setGuestName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,17 +28,18 @@ export function CreateRecording() {
     e.preventDefault();
     if (!userEmail || !userName) return;
 
+    const trimmedGuestEmail = guestEmail.trim().toLowerCase();
+
     setLoading(true);
     setError(null);
     try {
       const recording = await api.createRecording({
         host_user_id: userEmail,
         host_name: userName,
-        guest_user_id: guestEmail.trim().toLowerCase(),
-        guest_name: guestName.trim(),
+        guest_user_id: trimmedGuestEmail,
+        guest_name: nameFromEmail(trimmedGuestEmail),
         recording_name: recordingName.trim(),
       });
-      // Go straight to creating the first session under this recording
       navigate(`/session/new?recording_id=${recording.recording_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create recording");
@@ -47,7 +48,7 @@ export function CreateRecording() {
     }
   };
 
-  if (!userEmail || !userName) return null;
+  if (!userEmail) return null;
 
   return (
     <PageContainer>
@@ -97,15 +98,6 @@ export function CreateRecording() {
                 onChange={(e) => setGuestEmail(e.target.value)}
                 required
               />
-
-              <Input
-                label="Guest Name"
-                placeholder="Enter guest's name"
-                value={guestName}
-                onChange={(e) => setGuestName(e.target.value)}
-                required
-                maxLength={64}
-              />
             </div>
 
             {error && (
@@ -122,7 +114,7 @@ export function CreateRecording() {
               variant="primary"
               size="lg"
               loading={loading}
-              disabled={!recordingName.trim() || !guestEmail.trim() || !guestName.trim()}
+              disabled={!recordingName.trim() || !guestEmail.trim()}
               className="mt-1 w-full"
             >
               Create Recording

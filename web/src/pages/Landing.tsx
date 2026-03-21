@@ -4,36 +4,33 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { nameFromEmail } from "@/utils/identity";
 
 const EMAIL_KEY = "recstudio:user-email";
-const NAME_KEY = "recstudio:user-name";
 
 export function getStoredEmail(): string | null {
   return localStorage.getItem(EMAIL_KEY);
 }
 
 export function getStoredName(): string | null {
-  return localStorage.getItem(NAME_KEY);
+  const email = getStoredEmail();
+  return email ? nameFromEmail(email) : null;
 }
 
 export function clearStoredIdentity(): void {
   localStorage.removeItem(EMAIL_KEY);
-  localStorage.removeItem(NAME_KEY);
 }
 
 export function Landing() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const trimmedEmail = email.trim().toLowerCase();
-    const trimmedName = name.trim();
-    if (!trimmedEmail || !trimmedName) return;
+    if (!trimmedEmail) return;
 
     localStorage.setItem(EMAIL_KEY, trimmedEmail);
-    localStorage.setItem(NAME_KEY, trimmedName);
     navigate("/dashboard");
   };
 
@@ -57,42 +54,32 @@ export function Landing() {
             </svg>
           </div>
           <h1 className="text-3xl font-black tracking-tight text-text md:text-4xl">
-            Welcome to <span className="text-gradient-accent">Audio Studio</span>
+            Welcome to <span className="text-gradient-accent">RecStudio</span>
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-text-muted">
             Record high-quality audio sessions with guests.
             <br className="hidden sm:block" />
-            Enter your details to get started.
+            Enter your email to get started.
           </p>
         </div>
 
         <Card>
           <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-            <div className="space-y-5">
-              <Input
-                label="Your Email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-              />
-              <Input
-                label="Your Name"
-                placeholder="Enter your name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                maxLength={64}
-              />
-            </div>
+            <Input
+              label="Your Email"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoFocus
+            />
 
             <Button
               type="submit"
               variant="primary"
               size="lg"
-              disabled={!email.trim() || !name.trim()}
+              disabled={!email.trim()}
               className="mt-1 w-full"
             >
               Continue

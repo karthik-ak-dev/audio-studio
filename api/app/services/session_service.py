@@ -42,6 +42,7 @@ from app.types.responses import (
     SessionResponse,
     SessionActionResponse,
 )
+from app.utils.identity import name_from_email
 from app.utils.time import now_iso, unix_to_iso
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -86,10 +87,11 @@ async def create_session(req: CreateSessionRequest) -> CreateSessionResponse:
     room_config: dict[str, object] = room.get("config", {})  # type: ignore[assignment]
     room_expires_at: str = unix_to_iso(int(room_config["exp"]))
 
-    # When recording_id is set, identity comes from the Recording — not the request
-    host_name: str = rec_host_name if rec_host_name else req.host_name
-    guest_name: str = rec_guest_name if rec_guest_name else req.guest_name
+    # When recording_id is set, identity comes from the Recording — not the request.
+    # Names are derived from emails when not explicitly provided.
+    host_name: str = rec_host_name or req.host_name or name_from_email(req.host_user_id)
     guest_user_id: str = rec_guest_user_id or req.guest_user_id or f"guest-{session_id}"
+    guest_name: str = rec_guest_name or req.guest_name or name_from_email(guest_user_id)
 
     host_token: str = await daily_client.create_token(
         room_name=room_name,

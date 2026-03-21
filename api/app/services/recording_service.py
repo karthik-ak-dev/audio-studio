@@ -13,6 +13,7 @@ import logging
 from app.constants import RECORDING_ID_LENGTH
 from app.models.recording import Recording
 from app.repos import recording_repo
+from app.utils.identity import name_from_email
 from app.repos import session_repo
 from app.types.requests import CreateRecordingRequest
 from app.types.responses import RecordingResponse, RecordingWithSessionsResponse, SessionResponse
@@ -46,9 +47,9 @@ async def create_recording(req: CreateRecordingRequest) -> RecordingResponse:
     recording: Recording = Recording(
         recording_id=recording_id,
         host_user_id=req.host_user_id,
-        host_name=req.host_name,
+        host_name=req.host_name or name_from_email(req.host_user_id),
         guest_user_id=req.guest_user_id,
-        guest_name=req.guest_name,
+        guest_name=req.guest_name or name_from_email(req.guest_user_id),
         recording_name=req.recording_name,
         created_at=now,
         updated_at=now,

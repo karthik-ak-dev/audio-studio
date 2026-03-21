@@ -8,6 +8,7 @@ import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
 import { api } from "@/api/client";
 import { getStoredEmail, getStoredName } from "@/pages/Landing";
+import { nameFromEmail } from "@/utils/identity";
 import type { Recording } from "@/types/recording";
 
 const STORAGE_PREFIX = "recstudio:";
@@ -19,16 +20,14 @@ export function CreateSession() {
   const { loading, error, createSession, clearError } = useSessionApi();
 
   const userEmail = getStoredEmail();
-  const userName = getStoredName();
+  const hostName = getStoredName() ?? "";
 
   useEffect(() => {
-    if (!userEmail || !userName) {
+    if (!userEmail) {
       navigate("/", { replace: true });
     }
-  }, [userEmail, userName, navigate]);
+  }, [userEmail, navigate]);
 
-  const hostName = userName ?? "";
-  const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
 
   // Recording context — pre-filled when recording_id is in URL
@@ -36,7 +35,6 @@ export function CreateSession() {
   const [recording, setRecording] = useState<Recording | null>(null);
   const [recordingLoading, setRecordingLoading] = useState(!!recordingIdParam);
 
-  // Fetch recording details if recording_id is in URL
   useEffect(() => {
     if (!recordingIdParam) return;
     setRecordingLoading(true);
@@ -44,13 +42,9 @@ export function CreateSession() {
       .getRecording(recordingIdParam)
       .then((res) => {
         setRecording(res.recording);
-        setGuestName(res.recording.guest_name);
         setGuestEmail(res.recording.guest_user_id);
       })
-      .catch(() => {
-        // Recording not found — fall back to standalone mode
-        setRecording(null);
-      })
+      .catch(() => setRecording(null))
       .finally(() => setRecordingLoading(false));
   }, [recordingIdParam]);
 
@@ -59,11 +53,18 @@ export function CreateSession() {
     clearError();
     if (!userEmail) return;
 
+    const trimmedGuestEmail = recording
+      ? recording.guest_user_id
+      : guestEmail.trim().toLowerCase();
+    const guestName = recording
+      ? recording.guest_name
+      : nameFromEmail(trimmedGuestEmail);
+
     const result = await createSession({
       host_user_id: userEmail,
-      host_name: hostName.trim(),
-      guest_name: recording ? recording.guest_name : guestName.trim(),
-      guest_user_id: recording ? recording.guest_user_id : guestEmail.trim().toLowerCase() || undefined,
+      host_name: hostName,
+      guest_name: guestName,
+      guest_user_id: trimmedGuestEmail || undefined,
       recording_id: recording?.recording_id,
     });
 
@@ -85,8 +86,8 @@ export function CreateSession() {
           roomUrl: result.room_url,
           hostToken: result.host_token,
           guestJoinUrl: result.guest_join_url,
-          hostName: hostName.trim(),
-          guestName: recording ? recording.guest_name : guestName.trim(),
+          hostName,
+          guestName,
           hostUserId: userEmail,
         },
       });
@@ -94,10 +95,9 @@ export function CreateSession() {
     }
   };
 
-  if (!userEmail || !userName) return null;
+  if (!userEmail) return null;
 
   const isRecordingMode = !!recording;
-  const canSubmit = isRecordingMode || !!guestName.trim();
 
   return (
     <PageContainer>
@@ -151,28 +151,17 @@ export function CreateSession() {
                 <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-text-muted">Host</span>
               </div>
 
-              <div className="space-y-5">
-                <Input
-                  label="Guest Email"
-                  type="email"
-                  placeholder="guest@example.com"
-                  value={guestEmail}
-                  onChange={(e) => setGuestEmail(e.target.value)}
-                  disabled={isRecordingMode}
-                  className={isRecordingMode ? "opacity-60" : ""}
-                />
-
-                <Input
-                  label="Guest Name"
-                  placeholder="Enter guest's name"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  required={!isRecordingMode}
-                  maxLength={64}
-                  disabled={isRecordingMode}
-                  className={isRecordingMode ? "opacity-60" : ""}
-                />
-              </div>
+              <Input
+                label="Guest Email"
+                type="email"
+                placeholder="guest@example.com"
+                value={guestEmail}
+                onChange={(e) => setGuestEmail(e.target.value)}
+                required={!isRecordingMode}
+                disabled={isRecordingMode}
+                className={isRecordingMode ? "opacity-60" : ""}
+                autoFocus={!isRecordingMode}
+              />
 
               {error && (
                 <div className="flex items-start gap-3 rounded-md bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
@@ -188,7 +177,7 @@ export function CreateSession() {
                 variant="primary"
                 size="lg"
                 loading={loading}
-                disabled={!canSubmit}
+                disabled={!isRecordingMode && !guestEmail.trim()}
                 className="mt-1 w-full"
               >
                 Create Session
