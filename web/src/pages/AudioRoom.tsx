@@ -19,9 +19,10 @@ import type { ActionResult } from "@/hooks/useSessionApi";
 import { useSessionState, useSessionDispatch } from "@/context/SessionContext";
 import { SESSION_POLL_INTERVAL_MS } from "@/config/constants";
 import type { DailySdkEvent } from "@/types/daily";
+import { SESSION_STATUS } from "@/types/session";
 
 const STORAGE_PREFIX = "recstudio:";
-const TERMINAL_STATUSES = new Set(["processing", "completed", "cancelled", "error"]);
+const TERMINAL_STATUSES: Set<string> = new Set([SESSION_STATUS.PROCESSING, SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED, SESSION_STATUS.ERROR]);
 const POLL_FAIL_THRESHOLD = 3;
 
 export function AudioRoom() {
@@ -292,18 +293,18 @@ export function AudioRoom() {
   // ─── 5. Sync timer with server recording state ───
   useEffect(() => {
     if (
-      (sessionState.status === "recording" || sessionState.status === "paused") &&
+      (sessionState.status === SESSION_STATUS.RECORDING || sessionState.status === SESSION_STATUS.PAUSED) &&
       sessionState.recordingStartedAt
     ) {
       timer.sync(
         sessionState.recordingStartedAt,
         sessionState.pauseEvents,
-        sessionState.status === "recording",
+        sessionState.status === SESSION_STATUS.RECORDING,
       );
     } else if (
-      sessionState.status === "ready" ||
-      sessionState.status === "created" ||
-      sessionState.status === "waiting_for_guest"
+      sessionState.status === SESSION_STATUS.READY ||
+      sessionState.status === SESSION_STATUS.CREATED ||
+      sessionState.status === SESSION_STATUS.WAITING_FOR_GUEST
     ) {
       timer.reset();
     }
@@ -322,18 +323,18 @@ export function AudioRoom() {
     // First time we have both isJoined=true AND a known status — sync mute
     if (!muteSyncedRef.current) {
       muteSyncedRef.current = true;
-      if (curr === "paused") {
+      if (curr === SESSION_STATUS.PAUSED) {
         daily.setMuted(true);
       }
       return;
     }
 
     // Transition: recording → paused — auto-mute
-    if (prev === "recording" && curr === "paused") {
+    if (prev === SESSION_STATUS.RECORDING && curr === SESSION_STATUS.PAUSED) {
       daily.setMuted(true);
     }
     // Transition: paused → recording — auto-unmute
-    if (prev === "paused" && curr === "recording") {
+    if (prev === SESSION_STATUS.PAUSED && curr === SESSION_STATUS.RECORDING) {
       daily.setMuted(false);
     }
   }, [sessionState.status, daily.isJoined, daily.setMuted]);
@@ -381,9 +382,9 @@ export function AudioRoom() {
   };
 
   // ─── Derived state ───
-  const isRecording = sessionState.status === "recording";
-  const isPaused = sessionState.status === "paused";
-  const canStartRecording = sessionState.status === "ready" && sessionState.participantCount >= 2;
+  const isRecording = sessionState.status === SESSION_STATUS.RECORDING;
+  const isPaused = sessionState.status === SESSION_STATUS.PAUSED;
+  const canStartRecording = sessionState.status === SESSION_STATUS.READY && sessionState.participantCount >= 2;
   const canResume = isPaused && sessionState.participantCount >= 2;
   const showConnectionWarning = pollFailCount >= POLL_FAIL_THRESHOLD;
 

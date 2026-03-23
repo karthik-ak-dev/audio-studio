@@ -120,7 +120,7 @@ export const api = {
     });
   },
 
-  cancelSession(sessionId: string, body: { reason: string }): Promise<SessionActionResponse> {
+  cancelSession(sessionId: string, body: { host_user_id: string; reason: string }): Promise<SessionActionResponse> {
     return request<SessionActionResponse>(`/sessions/${sessionId}/cancel`, {
       method: "POST",
       body: JSON.stringify(body),

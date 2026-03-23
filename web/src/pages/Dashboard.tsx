@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Loader } from "@/components/ui/Loader";
 import { api } from "@/api/client";
 import { getStoredEmail, getStoredName, clearStoredIdentity } from "@/pages/Landing";
+import { SESSION_STATUS } from "@/types/session";
 import type { Session } from "@/types/session";
 import type { Recording } from "@/types/recording";
 
@@ -61,17 +62,17 @@ function groupSessionsByRecording(
 
 function statusBadge(status: string) {
   switch (status) {
-    case "completed":
+    case SESSION_STATUS.COMPLETED:
       return <Badge variant="accent">Completed</Badge>;
-    case "recording":
+    case SESSION_STATUS.RECORDING:
       return <Badge variant="error">Recording</Badge>;
-    case "paused":
+    case SESSION_STATUS.PAUSED:
       return <Badge variant="warning">Paused</Badge>;
-    case "processing":
+    case SESSION_STATUS.PROCESSING:
       return <Badge variant="warning">Processing</Badge>;
-    case "error":
+    case SESSION_STATUS.ERROR:
       return <Badge variant="error">Error</Badge>;
-    case "cancelled":
+    case SESSION_STATUS.CANCELLED:
       return <Badge variant="neutral">Cancelled</Badge>;
     default:
       return <Badge variant="neutral">{status.replace(/_/g, " ")}</Badge>;
@@ -98,7 +99,7 @@ function formatDatetime(iso: string): string {
   return `${d.toLocaleDateString("en-IN", { month: "short", day: "numeric" })} ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-const ACTIVE_STATUSES = new Set(["created", "waiting_for_guest", "ready", "recording", "paused"]);
+const ACTIVE_STATUSES: Set<string> = new Set([SESSION_STATUS.CREATED, SESSION_STATUS.WAITING_FOR_GUEST, SESSION_STATUS.READY, SESSION_STATUS.RECORDING, SESSION_STATUS.PAUSED]);
 
 const CopyIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
@@ -353,14 +354,10 @@ export function Dashboard() {
                                   >
                                     Go
                                   </Link>
-                                ) : session.status === "completed" || session.status === "processing" ? (
+                                ) : session.status === SESSION_STATUS.COMPLETED || session.status === SESSION_STATUS.PROCESSING || session.status === SESSION_STATUS.ERROR || session.status === SESSION_STATUS.CANCELLED ? (
                                   <Link
                                     to={`/session/${session.session_id}/complete`}
-                                    className={`rounded-md px-4 py-1.5 text-xs font-semibold transition-colors ${
-                                      session.status === "completed"
-                                        ? "bg-accent/10 text-accent hover:bg-accent/20"
-                                        : "bg-white/[0.04] text-text-muted hover:bg-white/[0.08]"
-                                    }`}
+                                    className="rounded-md bg-white/[0.04] px-4 py-1.5 text-xs font-semibold text-text-muted hover:bg-white/[0.08] transition-colors"
                                   >
                                     View
                                   </Link>

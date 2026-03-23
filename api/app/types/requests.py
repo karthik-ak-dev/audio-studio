@@ -40,4 +40,5 @@ class LeaveRequest(BaseModel):
 class CancelSessionRequest(BaseModel):
     """Request body for POST /sessions/{id}/cancel."""
 
+    host_user_id: str = Field(..., min_length=1, max_length=256)
     reason: str = Field(..., min_length=1, max_length=500)

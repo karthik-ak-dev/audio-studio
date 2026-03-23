@@ -19,7 +19,7 @@ interface UseSessionApiReturn {
   endSession: (sessionId: string) => Promise<ActionResult>;
   pauseSession: (sessionId: string) => Promise<ActionResult>;
   resumeSession: (sessionId: string) => Promise<ActionResult>;
-  cancelSession: (sessionId: string, reason: string) => Promise<ActionResult>;
+  cancelSession: (sessionId: string, hostUserId: string, reason: string) => Promise<ActionResult>;
   clearError: () => void;
 }
 
@@ -164,8 +164,8 @@ export function useSessionApi(): UseSessionApiReturn {
   );
 
   const cancelSession = useCallback(
-    (sessionId: string, reason: string) =>
-      executeAction(() => api.cancelSession(sessionId, { reason })),
+    (sessionId: string, hostUserId: string, reason: string) =>
+      executeAction(() => api.cancelSession(sessionId, { host_user_id: hostUserId, reason })),
     [executeAction],
   );
 

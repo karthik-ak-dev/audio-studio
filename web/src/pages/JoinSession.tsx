@@ -7,9 +7,10 @@ import { PageLoader } from "@/components/ui/Loader";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { useSessionApi } from "@/hooks/useSessionApi";
 import { useSessionDispatch } from "@/context/SessionContext";
+import { SESSION_STATUS } from "@/types/session";
 
 const STORAGE_PREFIX = "recstudio:";
-const TERMINAL_STATUSES = new Set(["processing", "completed", "error"]);
+const TERMINAL_STATUSES: Set<string> = new Set([SESSION_STATUS.PROCESSING, SESSION_STATUS.COMPLETED, SESSION_STATUS.ERROR]);
 
 export function JoinSession() {
   const { sessionId } = useParams<{ sessionId: string }>();

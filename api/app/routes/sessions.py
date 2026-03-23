@@ -118,7 +118,7 @@ async def end_session(session_id: str) -> SessionActionResponse:
 async def cancel_session(session_id: str, req: CancelSessionRequest) -> SessionActionResponse:
     """Cancel a completed session due to quality issues."""
     try:
-        return await session_service.cancel_session(session_id, req.reason)
+        return await session_service.cancel_session(session_id, req.host_user_id, req.reason)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
     except InvalidSessionStateError as exc:

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
-import type { SessionStatus } from "@/types/session";
+import { SESSION_STATUS, type SessionStatus } from "@/types/session";
 
 interface RecordingControlsProps {
   status: SessionStatus | null;
@@ -29,9 +29,9 @@ export function RecordingControls({
 }: RecordingControlsProps) {
   const [showEndConfirm, setShowEndConfirm] = useState<boolean>(false);
 
-  const isRecording = status === "recording";
-  const isPaused = status === "paused";
-  const isReady = status === "ready" || status === "created" || status === "waiting_for_guest" || status === null;
+  const isRecording = status === SESSION_STATUS.RECORDING;
+  const isPaused = status === SESSION_STATUS.PAUSED;
+  const isReady = status === SESSION_STATUS.READY || status === SESSION_STATUS.CREATED || status === SESSION_STATUS.WAITING_FOR_GUEST || status === null;
 
   // Guest view — status indicator only
   if (!isHost) {

@@ -5,7 +5,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
-import type { Session, SessionStatus } from "@/types/session";
+import { SESSION_STATUS, type Session, type SessionStatus } from "@/types/session";
 
 // ─── State ───────────────────────────────────────
 
@@ -111,7 +111,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         hostName: action.payload.hostName,
         guestName: action.payload.guestName,
         hostUserId: action.payload.hostUserId,
-        status: "created",
+        status: SESSION_STATUS.CREATED,
         isHost: true,
         error: null,
       };

@@ -8,6 +8,8 @@ import { PageLoader } from "@/components/ui/Loader";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { useSessionApi } from "@/hooks/useSessionApi";
 import { SESSION_POLL_INTERVAL_MS } from "@/config/constants";
+import { getStoredEmail } from "@/pages/Landing";
+import { SESSION_STATUS } from "@/types/session";
 import type { Session, SessionStatus } from "@/types/session";
 
 const statusBadgeVariant: Record<SessionStatus, "accent" | "warning" | "error" | "neutral"> = {
@@ -64,7 +66,7 @@ export function SessionComplete() {
       const result = await pollSession(sessionId);
       if (result) {
         setSession(result);
-        if (result.status === "completed" || result.status === "cancelled" || result.status === "error") {
+        if (result.status === SESSION_STATUS.COMPLETED || result.status === SESSION_STATUS.CANCELLED || result.status === SESSION_STATUS.ERROR) {
           clearInterval(interval);
         }
       }
@@ -74,9 +76,10 @@ export function SessionComplete() {
   }, [sessionId, getSession, pollSession]);
 
   const handleCancel = useCallback(async () => {
-    if (!sessionId || !cancelReason.trim()) return;
+    const userEmail = getStoredEmail();
+    if (!sessionId || !cancelReason.trim() || !userEmail) return;
     setCancelling(true);
-    const result = await cancelSession(sessionId, cancelReason.trim());
+    const result = await cancelSession(sessionId, userEmail, cancelReason.trim());
     setCancelling(false);
     if (result === true) {
       // Re-fetch to get updated status
@@ -102,10 +105,11 @@ export function SessionComplete() {
     );
   }
 
-  const isProcessing = session.status === "processing";
-  const isCompleted = session.status === "completed";
-  const isCancelled = session.status === "cancelled";
-  const isError = session.status === "error";
+  const isProcessing = session.status === SESSION_STATUS.PROCESSING;
+  const isCompleted = session.status === SESSION_STATUS.COMPLETED;
+  const isCancelled = session.status === SESSION_STATUS.CANCELLED;
+  const isError = session.status === SESSION_STATUS.ERROR;
+  const isHost = getStoredEmail() === session.host_user_id;
 
   // Build participant names from roster
   const participantNames = Object.values(session.participants);
@@ -241,15 +245,16 @@ export function SessionComplete() {
                   <AudioTrack label={`Guest — ${session.guest_name}`} url={session.guest_audio_presigned_url} />
                 )}
 
-                {/* Cancel session CTA */}
-                {!showCancelForm ? (
+                {/* Cancel session CTA — host only */}
+                {isHost && !showCancelForm && (
                   <button
                     onClick={() => setShowCancelForm(true)}
                     className="w-full text-center text-xs text-text-muted hover:text-red-400 transition-colors py-2"
                   >
                     Not satisfied with the quality? Cancel this session
                   </button>
-                ) : (
+                )}
+                {isHost && showCancelForm && (
                   <div className="rounded-md bg-red-500/[0.06] px-4 py-4 ring-1 ring-red-500/20 space-y-3">
                     <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
                       Cancel Session

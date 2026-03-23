@@ -1,13 +1,16 @@
-export type SessionStatus =
-  | "created"
-  | "waiting_for_guest"
-  | "ready"
-  | "recording"
-  | "paused"
-  | "processing"
-  | "completed"
-  | "cancelled"
-  | "error";
+export const SESSION_STATUS = {
+  CREATED: "created",
+  WAITING_FOR_GUEST: "waiting_for_guest",
+  READY: "ready",
+  RECORDING: "recording",
+  PAUSED: "paused",
+  PROCESSING: "processing",
+  COMPLETED: "completed",
+  CANCELLED: "cancelled",
+  ERROR: "error",
+} as const;
+
+export type SessionStatus = (typeof SESSION_STATUS)[keyof typeof SESSION_STATUS];
 
 export interface CreateSessionRequest {
   host_user_id: string;

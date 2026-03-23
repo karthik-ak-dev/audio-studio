@@ -333,15 +333,18 @@ async def end_session(session_id: str) -> SessionActionResponse:
     return SessionActionResponse(session_id=session_id, status=SessionStatus.PROCESSING)
 
 
-async def cancel_session(session_id: str, reason: str) -> SessionActionResponse:
+async def cancel_session(session_id: str, host_user_id: str, reason: str) -> SessionActionResponse:
     """Cancel a completed session — marks quality as unsatisfactory.
 
-    Only valid transition: completed → cancelled.
+    Only the host can cancel. Only valid transition: completed → cancelled.
     Stores the cancellation reason for downstream visibility.
     """
     session: Session | None = session_repo.get_by_id(session_id)
     if session is None:
         raise SessionNotFoundError(session_id)
+
+    if session.host_user_id != host_user_id:
+        raise InvalidSessionStateError(session_id, session.status, "cancel session — only the host can cancel")
 
     if session.status != SessionStatus.COMPLETED:
         raise InvalidSessionStateError(session_id, session.status, "cancel session")
